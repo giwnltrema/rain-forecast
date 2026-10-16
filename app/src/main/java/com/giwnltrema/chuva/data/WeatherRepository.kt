@@ -1,0 +1,152 @@
+package com.giwnltrema.chuva.data
+
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import java.io.IOException
+import java.time.Instant
+import java.time.LocalDateTime
+import java.time.ZoneOffset
+import java.util.Locale
+import java.util.concurrent.TimeUnit
+
+/**
+ * Fontes gratuitas e sem chave de API:
+ *  - Open-Meteo: previsão pontual (15 min, horária, diária) e grade para o mapa.
+ *  - RainViewer: imagens de radar das últimas ~2 h.
+ */
+class WeatherRepository(
+    private val client: OkHttpClient = OkHttpClient.Builder()
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .build(),
+) {
+    private val json = Json { ignoreUnknownKeys = true; coerceInputValues = true }
+
+    suspend fun forecast(lat: Double, lon: Double): Forecast = withContext(Dispatchers.IO) {
+        val url = "https://api.open-meteo.com/v1/forecast" +
+            "?latitude=${lat.fmt()}&longitude=${lon.fmt()}" +
+            "&current=temperature_2m,apparent_temperature,precipitation,weather_code,is_day" +
+            "&minutely_15=precipitation&forecast_minutely_15=12" +
+            "&hourly=precipitation,precipitation_probability,temperature_2m,weather_code,is_day" +
+            "&forecast_hours=48" +
+            "&daily=precipitation_sum,precipitation_probability_max,temperature_2m_min,temperature_2m_max,weather_code" +
+            "&forecast_days=7&timezone=auto&timeformat=unixtime"
+        json.decodeFromString<OmResponse>(get(url)).toForecast()
+    }
+
+    suspend fun radarFrames(): List<RadarFrame> = withContext(Dispatchers.IO) {
+        val maps = json.decodeFromString<RvMaps>(get("https://api.rainviewer.com/public/weather-maps.json"))
+        (maps.radar.past + maps.radar.nowcast).map {
+            // 256 px, esquema de cor 2 (Universal Blue), suavizado + neve.
+            RadarFrame(Instant.ofEpochSecond(it.time), "${maps.host}${it.path}/256/{z}/{x}/{y}/2/1_1.png")
+        }
+    }
+
+    /**
+     * Previsão horária de chuva numa grade [size]x[size] centrada em (lat, lon),
+     * com [step] graus entre os pontos (~9 km para 0.08°).
+     */
+    suspend fun forecastGrid(
+        lat: Double,
+        lon: Double,
+        size: Int = 15,
+        step: Double = 0.08,
+        hours: Int = 24,
+    ): ForecastGrid = withContext(Dispatchers.IO) {
+        val half = (size - 1) / 2.0
+        val lats = List(size) { r -> lat + (half - r) * step }
+        val lons = List(size) { c -> lon + (c - half) * step }
+        val qLat = ArrayList<String>(size * size)
+        val qLon = ArrayList<String>(size * size)
+        for (r in 0 until size) for (c in 0 until size) {
+            qLat += lats[r].fmt()
+            qLon += lons[c].fmt()
+        }
+        val url = "https://api.open-meteo.com/v1/forecast" +
+            "?latitude=${qLat.joinToString(",")}&longitude=${qLon.joinToString(",")}" +
+            "&hourly=precipitation&forecast_hours=$hours&timeformat=unixtime"
+        val points = json.decodeFromString<List<OmResponse>>(get(url))
+        require(points.size == size * size) { "Resposta incompleta da grade (${points.size})" }
+
+        val times = points.first().hourly?.time.orEmpty().map { Instant.ofEpochSecond(it - 3600) }
+        val values = times.indices.map { t ->
+            Array(size) { r ->
+                DoubleArray(size) { c ->
+                    points[r * size + c].hourly?.precipitation?.getOrNull(t) ?: 0.0
+                }
+            }
+        }
+        ForecastGrid(
+            north = lats.first(), south = lats.last(),
+            west = lons.first(), east = lons.last(),
+            rows = size, cols = size, times = times, values = values,
+        )
+    }
+
+    private fun get(url: String): String {
+        val request = Request.Builder().url(url).header("User-Agent", "Chuva-Android/1.0").build()
+        client.newCall(request).execute().use { resp ->
+            if (!resp.isSuccessful) throw IOException("HTTP ${resp.code} em ${request.url.host}")
+            return resp.body?.string() ?: throw IOException("Resposta vazia")
+        }
+    }
+
+    private fun Double.fmt() = String.format(Locale.US, "%.4f", this)
+}
+
+/**
+ * No Open-Meteo, a precipitação de um horário T é o acumulado do intervalo que *termina* em T.
+ * Aqui guardamos o *início* do intervalo, que é como a gente lê ("chuva das 14h às 15h").
+ */
+internal fun OmResponse.toForecast(now: Instant = Instant.now()): Forecast {
+    val offset = ZoneOffset.ofTotalSeconds(utcOffsetSeconds)
+    val c = current
+    val m = minutely15
+    val h = hourly
+    val d = daily
+
+    val nowcast = m?.time.orEmpty().mapIndexed { i, t ->
+        NowcastSlot(Instant.ofEpochSecond(t - 15 * 60), m!!.precipitation.getOrNull(i) ?: 0.0)
+    }.filter { it.time.plusSeconds(15 * 60) > now }
+
+    val hours = h?.time.orEmpty().mapIndexed { i, t ->
+        HourSlot(
+            time = Instant.ofEpochSecond(t - 3600),
+            mm = h!!.precipitation.getOrNull(i) ?: 0.0,
+            probability = h.probability.getOrNull(i),
+            temperature = h.temperature.getOrNull(i),
+            weatherCode = h.weatherCode.getOrNull(i),
+            isDay = (h.isDay.getOrNull(i) ?: 1) == 1,
+        )
+    }.filter { it.time.plusSeconds(3600) > now }
+
+    val days = d?.time.orEmpty().mapIndexed { i, t ->
+        DaySlot(
+            // Com timezone=auto, o "time" diário é meia-noite local.
+            date = LocalDateTime.ofEpochSecond(t, 0, offset).toLocalDate(),
+            mm = d!!.precipitation.getOrNull(i) ?: 0.0,
+            probability = d.probability.getOrNull(i),
+            tMin = d.tMin.getOrNull(i),
+            tMax = d.tMax.getOrNull(i),
+            weatherCode = d.weatherCode.getOrNull(i),
+        )
+    }
+
+    return Forecast(
+        current = Current(
+            temperature = c?.temperature,
+            apparent = c?.apparent,
+            precipitation = c?.precipitation ?: 0.0,
+            weatherCode = c?.weatherCode,
+            isDay = (c?.isDay ?: 1) == 1,
+        ),
+        nowcast = nowcast,
+        hourly = hours,
+        daily = days,
+        offset = offset,
+        fetchedAt = now,
+    )
+}
