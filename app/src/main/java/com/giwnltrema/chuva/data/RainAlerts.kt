@@ -42,7 +42,8 @@ private fun radarAlert(f: Forecast, r: RadarNow, place: String, leadMinutes: Int
     }
     val near = r.nearestKm ?: return null
     val radius = alertRadiusKm(leadMinutes)
-    val eta = r.etaMinutes
+    // Minutos a partir de agora (o radar tem atraso de 10–20 min).
+    val eta = r.arrivesAt?.let { (it.epochSecond - now.epochSecond) / 60 }
     val coming = eta != null && eta <= leadMinutes + 10
     if (near > radius || !(coming || near <= radius / 2)) return null
 
@@ -51,7 +52,7 @@ private fun radarAlert(f: Forecast, r: RadarNow, place: String, leadMinutes: Int
     val fmt = DateTimeFormatter.ofPattern("HH'h'mm", ptBR).withZone(f.offset)
     return if (coming) {
         Alert(
-            "Chuva ${relative(now, now.plusSeconds(eta!! * 60L), fmt)} em $place",
+            "Chuva ${relative(now, r.arrivesAt!!, fmt)} em $place",
             "Radar: chuva $level a $km, vindo na sua direção",
         )
     } else {

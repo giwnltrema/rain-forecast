@@ -216,7 +216,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     val area = async { freshRadarArea(from.lat, from.lon) }
                     val model = async { runCatching { tripRepo.modelAlong(samples) }.getOrNull() }
                     val now = Instant.now()
-                    val caster = area.await()?.let { withContext(Dispatchers.Default) { Nowcaster.from(it) } }
+                    val caster = area.await()?.let { withContext(Dispatchers.Default) { Nowcaster.from(it, now) } }
                     val modelFn = model.await() ?: { _, _ -> null }
                     val plans = DEPARTURES.map { d -> planTrip(samples, d, now, caster?.let { it::dbzAt }, modelFn) }
                     val best = bestPlan(plans)

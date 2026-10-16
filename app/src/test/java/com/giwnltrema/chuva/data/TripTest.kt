@@ -53,11 +53,14 @@ class TripTest {
             times = listOf(now.minusSeconds(1800), now),
             grids = listOf(blob(size, 25, 50, r = 4), blob(size, 40, 50, r = 4)),
         )
-        val caster = Nowcaster.from(area)
+        val caster = Nowcaster.from(area, now)
         assertNotNull(caster.motion)
         assertEquals(Int.MIN_VALUE, caster.dbzAt(lat, lon, 0.0)) // seco agora
         assertEquals(35, caster.dbzAt(lat, lon, 20.0)) // chuva chegando
         assertNull(caster.dbzAt(lat + 5, lon, 0.0)) // fora da área do radar
+        // com o quadro 10 min atrasado, a chuva chega 10 min "antes" a partir de agora
+        val late = Nowcaster.from(area, now.plusSeconds(600))
+        assertEquals(35, late.dbzAt(lat, lon, 10.0))
     }
 
     // --- rota e plano ---

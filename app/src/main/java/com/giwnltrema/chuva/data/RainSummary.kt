@@ -61,7 +61,7 @@ private fun summarizeWithRadar(f: Forecast, r: RadarNow, now: Instant): RainSumm
         val eta = r.etaMinutes
         return if (eta != null) {
             RainSummary(
-                headline = "Chuva chegando ${relative(now, now.plusSeconds(eta * 60L), fmt)}",
+                headline = "Chuva chegando ${relative(now, r.arrivesAt!!, fmt)}",
                 detail = "${level.label} a $km, vindo na sua direção (radar)",
                 level = level,
             )

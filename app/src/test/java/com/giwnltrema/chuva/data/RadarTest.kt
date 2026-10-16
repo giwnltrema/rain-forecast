@@ -61,6 +61,29 @@ class RadarTest {
     }
 
     @Test
+    fun realRainOverClutterIsNotErased() {
+        // O caso do Itaim: eco de prédio parado a tarde toda e, no último quadro, chuva forte em volta.
+        val clutter = block(-2, -2, 4, 30)
+        val frames = (0 until 12).map { frame(clutter) } + frame(block(-2, -2, 4, 30), block(-30, -30, 60, 33))
+        val mask = buildClutterMask(lat, lon, frames)
+        // a máscara existe (o eco ficou parado)…
+        assertTrue(mask.isNotEmpty())
+        // …mas com chuva em volta, o ponto conta como chovendo
+        val scan = scanFrame(lat, lon, mask, frames.last())
+        assertTrue("dbzHere=${scan.dbzHere}", (scan.dbzHere ?: 0) >= RAIN_DBZ)
+        // e com a vizinhança seca, continua sendo só eco
+        assertNull(scanFrame(lat, lon, mask, frame(clutter)).dbzHere)
+    }
+
+    @Test
+    fun radarDelayCountsTowardsArrival() {
+        val observed = now.minusSeconds(15 * 60) // quadro de 15 min atrás
+        val r = RadarNow(observed, null, 4.0, 40, etaMinutes = 15)
+        assertEquals(now, r.arrivesAt) // "chega em 15 min" a partir da imagem = agora
+        assertEquals("Chuva chegando a qualquer momento", summarize(wetModel, r, now).headline)
+    }
+
+    @Test
     fun isolatedPixelsAreIgnored() {
         val scan = scanFrame(lat, lon, emptySet(), frame(block(3, 3, 1, 35)))
         assertNull(scan.nearestKm)
@@ -120,10 +143,11 @@ class RadarTest {
 
     @Test
     fun approachingPerRadar() {
+        // radar observado há 5 min dizendo "chega em 25 min" → a partir de agora são ~20 min
         val s = summarize(wetModel, radar(null, 12.0, eta = 25), now)
-        assertEquals("Chuva chegando em ~25 min", s.headline)
+        assertEquals("Chuva chegando em ~20 min", s.headline)
         val a = rainAlert(wetModel, radar(null, 12.0, eta = 25), "Pinheiros", 30, now)!!
-        assertEquals("Chuva em ~25 min em Pinheiros", a.title)
+        assertEquals("Chuva em ~20 min em Pinheiros", a.title)
         assertFalse(dryAhead(wetModel, radar(null, 12.0, eta = 25), 30, now))
     }
 
