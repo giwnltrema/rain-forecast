@@ -2,11 +2,13 @@ package com.giwnltrema.chuva.data
 
 import java.time.Instant
 import kotlin.math.PI
+import kotlin.math.atan
 import kotlin.math.asinh
 import kotlin.math.cos
 import kotlin.math.floor
 import kotlin.math.hypot
 import kotlin.math.pow
+import kotlin.math.sinh
 import kotlin.math.tan
 
 /** O que o radar mostra agora em volta de um ponto. */
@@ -101,11 +103,14 @@ typealias FrameReader = (Int, Int) -> Int?
 
 fun pixelKey(x: Int, y: Int): Long = (x.toLong() shl 32) or (y.toLong() and 0xFFFFFFFFL)
 
-/** Janela de pixels em volta do ponto, até [RADAR_RADIUS_KM]. */
-private class Window(lat: Double, lon: Double) {
+/**
+ * Janela quadrada de pixels (zoom [RADAR_ZOOM]) em volta de um ponto.
+ * Com [circular], pixels além de [radiusKm] ficam de fora.
+ */
+class RadarWindow(lat: Double, lon: Double, val radiusKm: Double = RADAR_RADIUS_KM, private val circular: Boolean = true) {
     val c = toGlobalPx(lat, lon)
     val kmPerPx = metersPerPixel(lat) / 1000
-    val r = (RADAR_RADIUS_KM / kmPerPx).toInt() + 1
+    val r = (radiusKm / kmPerPx).toInt() + 1
     val size = 2 * r + 1
     val x0 = floor(c.x).toInt() - r
     val y0 = floor(c.y).toInt() - r
@@ -116,25 +121,32 @@ private class Window(lat: Double, lon: Double) {
     fun read(frame: FrameReader): IntArray = IntArray(size * size) { idx ->
         val i = idx % size
         val j = idx / size
-        if (km(i, j) > RADAR_RADIUS_KM) Int.MIN_VALUE else frame(x0 + i, y0 + j) ?: Int.MIN_VALUE
+        if (circular && km(i, j) > radiusKm) Int.MIN_VALUE else frame(x0 + i, y0 + j) ?: Int.MIN_VALUE
     }
+
+    val north get() = pxToLat(y0.toDouble())
+    val south get() = pxToLat((y0 + size).toDouble())
+    val west get() = pxToLon(x0.toDouble())
+    val east get() = pxToLon((x0 + size).toDouble())
 }
+
+private const val WORLD_PX = 256.0 * (1 shl RADAR_ZOOM)
+private fun pxToLon(x: Double) = x / WORLD_PX * 360.0 - 180.0
+private fun pxToLat(y: Double) = atan(sinh(PI * (1 - 2 * y / WORLD_PX))) * 180 / PI
 
 /**
  * "Clutter": ecos parados que o radar vê em prédios, torres e morros (ex.: espigão da Paulista).
  * Um pixel é clutter se tem eco em pelo menos metade dos quadros (~2 h) enquanto a vizinhança
  * fica quase sempre seca — chuva de verdade se move ou cobre áreas grandes.
- * Devolve as chaves ([pixelKey]) dos pixels a ignorar, já com 1 pixel de margem.
+ * Devolve uma máscara da janela (true = ignorar), já com 1 pixel de margem.
  */
-fun buildClutterMask(lat: Double, lon: Double, frames: List<FrameReader>): Set<Long> {
-    if (frames.size < 6) return emptySet()
-    val w = Window(lat, lon)
-    val grids = frames.map { w.read(it) }
+fun clutterMask(w: RadarWindow, grids: List<IntArray>): BooleanArray {
+    val mask = BooleanArray(w.size * w.size)
     val n = grids.size
+    if (n < 6) return mask
     val persist = IntArray(w.size * w.size)
     for (g in grids) for (k in g.indices) if (g[k] >= 10) persist[k]++
 
-    val base = ArrayList<Int>()
     for (k in persist.indices) {
         if (persist[k] * 2 < n) continue
         val i = k % w.size
@@ -150,29 +162,71 @@ fun buildClutterMask(lat: Double, lon: Double, frames: List<FrameReader>): Set<L
                 if (g[jj * w.size + ii] >= RAIN_DBZ) wet++
             }
         }
-        if (total > 0 && wet.toDouble() / total < 0.35) base += k
-    }
-
-    val mask = HashSet<Long>()
-    for (k in base) {
-        val x = w.x0 + k % w.size
-        val y = w.y0 + k / w.size
-        for (dy in -1..1) for (dx in -1..1) mask += pixelKey(x + dx, y + dy)
+        if (total == 0 || wet.toDouble() / total >= 0.35) continue
+        for (dj in -1..1) for (di in -1..1) {
+            val ii = i + di
+            val jj = j + dj
+            if (ii in 0 until w.size && jj in 0 until w.size) mask[jj * w.size + ii] = true
+        }
     }
     return mask
 }
 
+/** Versão com chaves globais ([pixelKey]), para guardar entre execuções. */
+fun buildClutterMask(lat: Double, lon: Double, frames: List<FrameReader>): Set<Long> {
+    val w = RadarWindow(lat, lon)
+    val mask = clutterMask(w, frames.map { w.read(it) })
+    val keys = HashSet<Long>()
+    for (k in mask.indices) if (mask[k]) keys += pixelKey(w.x0 + k % w.size, w.y0 + k / w.size)
+    return keys
+}
+
 /**
- * Varre um quadro do radar em volta do ponto, ignorando o [clutter] e pixels de chuva
- * isolados (exige pelo menos 2 vizinhos com chuva — chuva real vem em manchas).
+ * Tira do quadro o que não é chuva: clutter e pixels de chuva isolados
+ * (exige pelo menos 2 vizinhos com chuva — chuva real vem em manchas).
  */
-fun scanFrame(lat: Double, lon: Double, clutter: Set<Long>, frame: FrameReader): FrameScan {
-    val w = Window(lat, lon)
-    val g = w.read(frame)
-    for (k in g.indices) {
-        if (g[k] != Int.MIN_VALUE && pixelKey(w.x0 + k % w.size, w.y0 + k / w.size) in clutter) g[k] = Int.MIN_VALUE
-    }
+fun cleanGrid(w: RadarWindow, grid: IntArray, mask: (Int) -> Boolean): IntArray {
+    val g = grid.copyOf()
+    for (k in g.indices) if (g[k] != Int.MIN_VALUE && mask(k)) g[k] = Int.MIN_VALUE
     fun rain(i: Int, j: Int) = i in 0 until w.size && j in 0 until w.size && g[j * w.size + i] >= RAIN_DBZ
+    val out = g.copyOf()
+    for (j in 0 until w.size) for (i in 0 until w.size) {
+        if (!rain(i, j)) continue
+        var neighbors = 0
+        for (dj in -1..1) for (di in -1..1) if ((di != 0 || dj != 0) && rain(i + di, j + dj)) neighbors++
+        if (neighbors < 2) out[j * w.size + i] = Int.MIN_VALUE
+    }
+    return out
+}
+
+/** Radar limpo (sem clutter) numa área quadrada, pronto para desenhar no mapa. */
+class RadarArea(
+    val north: Double,
+    val south: Double,
+    val west: Double,
+    val east: Double,
+    val size: Int,
+    val times: List<Instant>,
+    /** dBZ por pixel, linha 0 = norte; Int.MIN_VALUE = sem chuva. */
+    val grids: List<IntArray>,
+)
+
+fun buildRadarArea(lat: Double, lon: Double, radiusKm: Double, frames: List<Pair<Instant, FrameReader>>): RadarArea {
+    val w = RadarWindow(lat, lon, radiusKm, circular = false)
+    val grids = frames.map { w.read(it.second) }
+    val mask = clutterMask(w, grids)
+    return RadarArea(
+        north = w.north, south = w.south, west = w.west, east = w.east,
+        size = w.size,
+        times = frames.map { it.first },
+        grids = grids.map { cleanGrid(w, it) { k -> mask[k] } },
+    )
+}
+
+/** Varre um quadro do radar em volta do ponto, ignorando o [clutter] e pixels de chuva isolados. */
+fun scanFrame(lat: Double, lon: Double, clutter: Set<Long>, frame: FrameReader): FrameScan {
+    val w = RadarWindow(lat, lon)
+    val g = cleanGrid(w, w.read(frame)) { k -> pixelKey(w.x0 + k % w.size, w.y0 + k / w.size) in clutter }
 
     var here: Int? = null
     var nearest: Double? = null
@@ -180,11 +234,6 @@ fun scanFrame(lat: Double, lon: Double, clutter: Set<Long>, frame: FrameReader):
     for (j in 0 until w.size) for (i in 0 until w.size) {
         val dbz = g[j * w.size + i]
         if (dbz == Int.MIN_VALUE) continue
-        if (dbz >= RAIN_DBZ) {
-            var neighbors = 0
-            for (dj in -1..1) for (di in -1..1) if ((di != 0 || dj != 0) && rain(i + di, j + dj)) neighbors++
-            if (neighbors < 2) continue
-        }
         val km = w.km(i, j)
         if (km <= 1.5) here = maxOf(here ?: dbz, dbz)
         if (km <= 25) maxNearby = maxOf(maxNearby ?: dbz, dbz)

@@ -1,8 +1,8 @@
 package com.giwnltrema.chuva.ui.map
 
+import android.graphics.Bitmap
 import android.view.Gravity
 import androidx.compose.foundation.background
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -50,7 +50,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -89,11 +88,10 @@ private val hourOnly = DateTimeFormatter.ofPattern("HH'h'").withZone(ZoneId.syst
 fun MapScreen(
     home: HomeState,
     state: MapState,
-    onLoadRadar: (Boolean) -> Unit,
+    onLoadRadar: (Double, Double, Boolean) -> Unit,
     onLoadGrid: (Double, Double) -> Unit,
 ) {
     val place = home.place ?: LocationProvider.SAO_PAULO
-    val dark = isSystemInDarkTheme()
     val markerColor = MaterialTheme.colorScheme.primary.toArgb()
     val statusBarPx = WindowInsets.statusBars.getTop(LocalDensity.current)
     val density = LocalDensity.current.density
@@ -120,9 +118,9 @@ fun MapScreen(
                 setAttributionMargins(0, statusBarPx + (12 * density).toInt(), (12 * density).toInt(), 0)
             }
             m.setMaxZoomPreference(13.0)
-            m.cameraPosition = CameraPosition.Builder().target(LatLng(place.lat, place.lon)).zoom(8.0).build()
+            m.cameraPosition = CameraPosition.Builder().target(LatLng(place.lat, place.lon)).zoom(9.5).build()
             centeredOn = LatLng(place.lat, place.lon)
-            m.setStyle(Style.Builder().fromUri(baseStyleUrl(dark))) { s ->
+            m.setStyle(Style.Builder().fromUri(BASE_STYLE_URL)) { s ->
                 s.addUserMarker(place, markerColor)
                 style = s
             }
@@ -141,7 +139,7 @@ fun MapScreen(
         }
     }
 
-    LaunchedEffect(Unit) { onLoadRadar(false) }
+    LaunchedEffect(place) { onLoadRadar(place.lat, place.lon, false) }
 
     LaunchedEffect(mode) {
         playing = false
@@ -149,13 +147,22 @@ fun MapScreen(
     }
 
     // --- Radar ---
-    LaunchedEffect(style, state.radar) {
-        val s = style ?: return@LaunchedEffect
-        s.setRadarFrames(state.radar)
-        radarIndex = (state.radar.size - 1).coerceAtLeast(0)
+    // Todos os quadros já desenhados de antemão: a animação só troca a imagem.
+    var radarImages by remember { mutableStateOf<List<Bitmap>>(emptyList()) }
+    LaunchedEffect(state.radar) {
+        val area = state.radar
+        radarImages = if (area == null) emptyList()
+        else withContext(Dispatchers.Default) { area.grids.map { renderRadarGrid(it, area.size) } }
     }
-    LaunchedEffect(style, state.radar, radarIndex, mode) {
-        style?.showRadarFrame(if (mode == Mode.RADAR) radarIndex else null)
+    LaunchedEffect(state.radar) {
+        radarIndex = ((state.radar?.times?.size ?: 0) - 1).coerceAtLeast(0)
+    }
+    LaunchedEffect(style, radarImages, radarIndex) {
+        val s = style ?: return@LaunchedEffect
+        val area = state.radar ?: return@LaunchedEffect
+        val image = radarImages.getOrNull(radarIndex) ?: return@LaunchedEffect
+        s.setOverlay(RADAR, Bounds(area.north, area.south, area.west, area.east), image)
+        s.showOverlay(RADAR, mode == Mode.RADAR)
     }
 
     // --- Previsão ---
@@ -169,12 +176,15 @@ fun MapScreen(
         val grid = state.grid ?: return@LaunchedEffect
         val values = grid.values.getOrNull(forecastIndex) ?: return@LaunchedEffect
         val bitmap = withContext(Dispatchers.Default) { renderRainGrid(values) }
-        s.setForecastImage(grid, bitmap)
-        s.showForecast(mode == Mode.FORECAST)
+        s.setOverlay(FORECAST, Bounds(grid.north, grid.south, grid.west, grid.east), bitmap)
+        s.showOverlay(FORECAST, mode == Mode.FORECAST)
     }
-    LaunchedEffect(style, mode) { style?.showForecast(mode == Mode.FORECAST) }
+    LaunchedEffect(style, mode) {
+        style?.showOverlay(RADAR, mode == Mode.RADAR)
+        style?.showOverlay(FORECAST, mode == Mode.FORECAST)
+    }
 
-    val frameCount = if (mode == Mode.RADAR) state.radar.size else state.grid?.times?.size ?: 0
+    val frameCount = (if (mode == Mode.RADAR) state.radar?.times?.size else state.grid?.times?.size) ?: 0
 
     // Animação: avança um quadro a cada ~0,6 s e pausa um pouco no final.
     LaunchedEffect(playing, mode, frameCount) {
@@ -243,7 +253,10 @@ fun MapScreen(
                     )
                 } else {
                     SuggestionChip(
-                        onClick = { onLoadRadar(true) },
+                        onClick = {
+                            val target = map?.cameraPosition?.target ?: LatLng(place.lat, place.lon)
+                            onLoadRadar(target.latitude, target.longitude, true)
+                        },
                         icon = { Icon(Icons.Rounded.Refresh, null) },
                         label = { Text("Atualizar") },
                         colors = SuggestionChipDefaults.suggestionChipColors(
@@ -307,7 +320,7 @@ private fun TimelineCard(
                 Column(Modifier.weight(1f)) {
                     Text(timeLabel(mode, state, index), style = MaterialTheme.typography.titleSmall)
                     Text(
-                        if (mode == Mode.RADAR) "Radar observado · últimas 2 h"
+                        if (mode == Mode.RADAR) "Radar observado · últimas 2 h · ecos de prédios filtrados"
                         else "Modelo numérico · mm/h · próximas 24 h",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -322,7 +335,7 @@ private fun TimelineCard(
                     steps = (count - 2).coerceAtLeast(0),
                 )
             }
-            if (mode == Mode.RADAR) RadarLegend() else Legend()
+            Legend()
             state.error?.let {
                 Spacer(Modifier.height(6.dp))
                 Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelMedium)
@@ -335,7 +348,7 @@ private fun timeLabel(mode: Mode, state: MapState, index: Int): String {
     val now = Instant.now()
     return when (mode) {
         Mode.RADAR -> {
-            val t = state.radar.getOrNull(index)?.time ?: return "Carregando radar…"
+            val t = state.radar?.times?.getOrNull(index) ?: return "Carregando radar…"
             val min = Duration.between(t, now).toMinutes()
             if (min < 10) "Agora · ${clock.format(t)}" else "Há $min min · ${clock.format(t)}"
         }
@@ -367,44 +380,6 @@ private fun Legend() {
                 Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-    }
-}
-
-/** Cores reais do radar (paleta Universal Blue do RainViewer). */
-private val radarStops = listOf(
-    Color(0x96CEC087), // 10 dBZ – garoa/ruído
-    Color(0xFF88DDEE), // 15
-    Color(0xFF00A3E0), // 20 – chuva fraca
-    Color(0xFF005588), // 30
-    Color(0xFFFFEE00), // 35 – moderada
-    Color(0xFFFF8100), // 44
-    Color(0xFFFF4400), // 45 – forte
-    Color(0xFFC10000), // 50
-    Color(0xFFFFAAFF), // 55 – muito forte / granizo
-)
-
-@Composable
-private fun RadarLegend() {
-    Column {
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(8.dp)
-                .clip(RoundedCornerShape(50))
-                .background(Brush.horizontalGradient(radarStops)),
-        )
-        Spacer(Modifier.height(2.dp))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            listOf("garoa", "fraca", "moderada", "forte", "extrema").forEach {
-                Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
-        Text(
-            "Manchas paradas no mesmo lugar (ex.: sobre a Paulista) costumam ser eco de prédios, não chuva.",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 4.dp),
-        )
     }
 }
 

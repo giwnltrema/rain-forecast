@@ -16,7 +16,9 @@ com cara de Android moderno (Material You / Material 3).
 - **Radar**: imagens reais de radar das últimas ~2 h, animadas — dá para ver as formações chegando.
 - **Previsão**: mapa de chuva prevista (mm/h) hora a hora para as próximas 24 h, numa área de ~120 km
   em volta de você. *"Prever nesta área"* recalcula para onde o mapa estiver.
-- Nomes de ruas/bairros ficam **por cima** da chuva, então dá para ler onde está chovendo.
+- Mapa claro e colorido (estilo Google/Waze); a chuva fica por cima das ruas, semitransparente,
+  e os nomes de ruas/bairros por cima dela — dá para ver exatamente onde está chovendo.
+- Mesma escala de cor no radar e na previsão; garoa quase some, chuva de verdade fica forte.
 - Tema claro/escuro automático e cores do seu papel de parede (Android 12+).
 
 **Notificações** (sino no topo da tela)
@@ -44,7 +46,8 @@ com cara de Android moderno (Material You / Material 3).
 - **Previsão** (próximas horas/dias) vem do modelo do Open-Meteo, que erra bastante o "neste minuto".
 - **Filtro de clutter**: o radar vê prédios e torres (ex.: espigão da Paulista) como chuva parada.
   Pixels com eco em ≥ metade dos quadros das últimas 2 h, com a vizinhança seca, são ignorados,
-  assim como pixels de chuva isolados. O mapa de radar ainda mostra essas manchas (os tiles vêm prontos).
+  assim como pixels de chuva isolados — no texto, nos alertas **e no mapa** (o app desenha o radar
+  ele mesmo, suavizado, numa área de ~150 km; "Atualizar" recentraliza onde o mapa estiver).
 - O plano gratuito do RainViewer só tem o passado (~2 h) e zoom até 7 (~1 km por pixel).
 
 ## Instalar no celular

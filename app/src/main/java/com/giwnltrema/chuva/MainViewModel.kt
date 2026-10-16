@@ -9,7 +9,7 @@ import com.giwnltrema.chuva.data.Forecast
 import com.giwnltrema.chuva.data.ForecastGrid
 import com.giwnltrema.chuva.data.LocationProvider
 import com.giwnltrema.chuva.data.Place
-import com.giwnltrema.chuva.data.RadarFrame
+import com.giwnltrema.chuva.data.RadarArea
 import com.giwnltrema.chuva.data.RadarNow
 import com.giwnltrema.chuva.data.WeatherRepository
 import com.giwnltrema.chuva.notify.RainCheckWorker
@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.time.Duration
 import java.time.Instant
+import kotlin.math.abs
 
 data class HomeState(
     val place: Place? = null,
@@ -34,7 +35,8 @@ data class HomeState(
 )
 
 data class MapState(
-    val radar: List<RadarFrame> = emptyList(),
+    /** Radar já limpo (sem clutter) numa área de ~150 km em volta de você. */
+    val radar: RadarArea? = null,
     val grid: ForecastGrid? = null,
     val loadingRadar: Boolean = false,
     val loadingGrid: Boolean = false,
@@ -58,6 +60,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private var homeJob: Job? = null
     private var radarFetchedAt: Instant? = null
+    private var radarCenter: Pair<Double, Double>? = null
 
     fun refresh() {
         homeJob?.cancel()
@@ -80,15 +83,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Recarrega o radar se tiver mais de 5 min (o RainViewer atualiza a cada 10). */
-    fun loadRadar(force: Boolean = false) {
+    fun loadRadar(lat: Double, lon: Double, force: Boolean = false) {
         val last = radarFetchedAt
-        if (!force && last != null && Duration.between(last, Instant.now()).toMinutes() < 5) return
+        val center = radarCenter
+        val sameArea = center != null && abs(center.first - lat) < 0.05 && abs(center.second - lon) < 0.05
+        if (!force && sameArea && last != null && Duration.between(last, Instant.now()).toMinutes() < 5) return
+        if (_map.value.loadingRadar) return
         viewModelScope.launch {
             _map.update { it.copy(loadingRadar = true, error = null) }
-            runCatching { repo.radarFrames() }
-                .onSuccess { frames ->
+            runCatching { repo.radarArea(lat, lon) }
+                .onSuccess { area ->
                     radarFetchedAt = Instant.now()
-                    _map.update { it.copy(radar = frames, loadingRadar = false) }
+                    radarCenter = lat to lon
+                    _map.update { it.copy(radar = area, loadingRadar = false) }
                 }
                 .onFailure { e -> _map.update { it.copy(loadingRadar = false, error = e.friendly()) } }
         }

@@ -3,6 +3,9 @@ package com.giwnltrema.chuva.data
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
@@ -74,16 +77,42 @@ class WeatherRepository(
         }.getOrNull()
     }
 
+    /** Radar limpo (sem clutter) numa área de ~[radiusKm] em volta do ponto, para o mapa. */
+    suspend fun radarArea(lat: Double, lon: Double, radiusKm: Double = 150.0): RadarArea = withContext(Dispatchers.IO) {
+        val now = Instant.now()
+        val frames = radarFrames().filter { !it.time.isAfter(now) }
+        // Baixa todos os tiles de todos os quadros em paralelo (~13 quadros x até 4 tiles).
+        val w = RadarWindow(lat, lon, radiusKm, circular = false)
+        val tileCoords = buildList {
+            for (ty in Math.floorDiv(w.y0, 256)..Math.floorDiv(w.y0 + w.size - 1, 256))
+                for (tx in Math.floorDiv(w.x0, 256)..Math.floorDiv(w.x0 + w.size - 1, 256)) add(tx to ty)
+        }
+        val readers = coroutineScope {
+            frames.map { frame ->
+                async {
+                    val tiles = HashMap<Long, IntArray?>()
+                    tileCoords.map { (tx, ty) -> async { pixelKey(tx, ty) to fetchTile(frame, tx, ty) } }
+                        .awaitAll().forEach { (k, v) -> tiles[k] = v }
+                    frame.time to reader(frame, tiles)
+                }
+            }.awaitAll()
+        }
+        buildRadarArea(lat, lon, radiusKm, readers)
+    }
+
+    /**
+     * Tile sem suavização (0_0), para as cores baterem exatamente com a paleta.
+     * Erro de rede propaga (não pode virar "sem chuva"); 404 = fora da cobertura = null.
+     */
+    private fun fetchTile(frame: RadarFrame, tx: Int, ty: Int): IntArray? =
+        getBytes("${frame.base}/256/$RADAR_ZOOM/$tx/$ty/2/0_0.png")?.let(decodeArgb)
+
     /** Lê pixels de um quadro, baixando cada tile uma vez só. */
-    private fun reader(frame: RadarFrame): FrameReader {
-        val tiles = HashMap<Long, IntArray?>()
+    private fun reader(frame: RadarFrame, tiles: HashMap<Long, IntArray?> = HashMap()): FrameReader {
         return { x, y ->
             val tx = Math.floorDiv(x, 256)
             val ty = Math.floorDiv(y, 256)
-            val pixels = tiles.getOrPut(pixelKey(tx, ty)) {
-                // Sem suavização (0_0) para as cores baterem exatamente com a paleta.
-                getBytes("${frame.base}/256/$RADAR_ZOOM/$tx/$ty/2/0_0.png")?.let(decodeArgb)
-            }
+            val pixels = tiles.getOrPut(pixelKey(tx, ty)) { fetchTile(frame, tx, ty) }
             pixels?.let { RadarPalette.dbzOf(it[Math.floorMod(y, 256) * 256 + Math.floorMod(x, 256)]) }
         }
     }
