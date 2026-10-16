@@ -201,6 +201,9 @@ fun cleanGrid(w: RadarWindow, grid: IntArray, mask: (Int) -> Boolean): IntArray 
 
 /** Radar limpo (sem clutter) numa área quadrada, pronto para desenhar no mapa. */
 class RadarArea(
+    /** Canto noroeste da janela em pixels globais (zoom [RADAR_ZOOM]). */
+    val x0: Int,
+    val y0: Int,
     val north: Double,
     val south: Double,
     val west: Double,
@@ -216,6 +219,7 @@ fun buildRadarArea(lat: Double, lon: Double, radiusKm: Double, frames: List<Pair
     val grids = frames.map { w.read(it.second) }
     val mask = clutterMask(w, grids)
     return RadarArea(
+        x0 = w.x0, y0 = w.y0,
         north = w.north, south = w.south, west = w.west, east = w.east,
         size = w.size,
         times = frames.map { it.first },
@@ -266,4 +270,81 @@ fun radarNow(latest: FrameScan, latestAt: Instant, earlier: FrameScan?, earlierA
 interface ClutterCache {
     fun load(lat: Double, lon: Double, now: Instant): Set<Long>?
     fun save(lat: Double, lon: Double, now: Instant, mask: Set<Long>)
+}
+
+// --- Nowcast: para onde a chuva está andando ---
+
+/** Velocidade da chuva em pixels de radar (~1 km) por minuto. */
+data class Motion(val dxPerMin: Double, val dyPerMin: Double) {
+    fun kmh(lat: Double) = hypot(dxPerMin, dyPerMin) * 60 * metersPerPixel(lat) / 1000
+}
+
+/**
+ * Estima o deslocamento médio das áreas de chuva entre dois quadros ([minutes] de diferença):
+ * testa cada deslocamento e fica com o que mais sobrepõe a chuva de antes com a de agora.
+ * null quando há pouca chuva para dizer algo.
+ */
+fun estimateMotion(prev: IntArray, curr: IntArray, size: Int, minutes: Double, maxShift: Int = 24): Motion? {
+    val rain = curr.indices.filter { curr[it] >= RAIN_DBZ }
+    if (rain.size < 30 || minutes <= 0) return null
+    var best = 0
+    var bestDx = 0
+    var bestDy = 0
+    var bestDist = 0
+    for (sy in -maxShift..maxShift) for (sx in -maxShift..maxShift) {
+        var hits = 0
+        for (k in rain) {
+            val i = k % size - sx
+            val j = k / size - sy
+            if (i in 0 until size && j in 0 until size && prev[j * size + i] >= RAIN_DBZ) hits++
+        }
+        val dist = sx * sx + sy * sy
+        // Em empate, prefere o menor deslocamento (chuva parada é o palpite mais seguro).
+        if (hits > best || (hits == best && dist < bestDist)) {
+            best = hits; bestDx = sx; bestDy = sy; bestDist = dist
+        }
+    }
+    if (best < rain.size * 0.25) return null
+    return Motion(bestDx / minutes, bestDy / minutes)
+}
+
+/**
+ * Projeta o último quadro do radar no futuro, deslocando a chuva com [motion]
+ * (ou mantendo parada se null). A incerteza cresce com o tempo: olhamos um raio maior.
+ */
+class Nowcaster(private val area: RadarArea, val motion: Motion?) {
+    private val latest = area.grids.lastOrNull()
+    val observedAt: Instant? = area.times.lastOrNull()
+
+    /** dBZ esperado em (lat, lon) daqui a [minutesAhead] min; null fora da área do radar. */
+    fun dbzAt(lat: Double, lon: Double, minutesAhead: Double): Int? {
+        val g = latest ?: return null
+        val p = toGlobalPx(lat, lon)
+        val vx = motion?.dxPerMin ?: 0.0
+        val vy = motion?.dyPerMin ?: 0.0
+        val cx = (p.x - area.x0 - vx * minutesAhead).toInt()
+        val cy = (p.y - area.y0 - vy * minutesAhead).toInt()
+        if (cx !in 0 until area.size || cy !in 0 until area.size) return null
+        val r = 1 + (minutesAhead / 20).toInt()
+        var best = Int.MIN_VALUE
+        for (dy in -r..r) for (dx in -r..r) {
+            if (dx * dx + dy * dy > r * r) continue
+            val i = cx + dx
+            val j = cy + dy
+            if (i in 0 until area.size && j in 0 until area.size) best = maxOf(best, g[j * area.size + i])
+        }
+        return best
+    }
+
+    companion object {
+        /** Usa o quadro de ~30 min antes do último para medir o movimento. */
+        fun from(area: RadarArea): Nowcaster {
+            val n = area.times.size
+            if (n < 2) return Nowcaster(area, null)
+            val last = area.times[n - 1]
+            val i = (0 until n - 1).lastOrNull { !area.times[it].isAfter(last.minusSeconds(25 * 60)) } ?: 0
+            val minutes = (last.epochSecond - area.times[i].epochSecond) / 60.0
+            return Nowcaster(area, estimateMotion(area.grids[i], area.grids[n - 1], area.size, minutes))
+        }
+    }
 }

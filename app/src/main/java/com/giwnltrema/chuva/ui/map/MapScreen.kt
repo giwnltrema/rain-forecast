@@ -385,7 +385,7 @@ private fun Legend() {
 
 /** MapView do MapLibre amarrado ao ciclo de vida da tela. */
 @Composable
-private fun rememberMapViewWithLifecycle(): MapView {
+internal fun rememberMapViewWithLifecycle(): MapView {
     val context = LocalContext.current
     val mapView = remember { MapView(context).apply { onCreate(null) } }
     val lifecycle = LocalLifecycleOwner.current.lifecycle

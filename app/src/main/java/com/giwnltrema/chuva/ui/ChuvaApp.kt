@@ -4,8 +4,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Map
+import androidx.compose.material.icons.outlined.Route
 import androidx.compose.material.icons.outlined.WaterDrop
 import androidx.compose.material.icons.rounded.Map
+import androidx.compose.material.icons.rounded.Route
 import androidx.compose.material.icons.rounded.WaterDrop
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
@@ -25,11 +27,13 @@ import com.giwnltrema.chuva.MainViewModel
 import com.giwnltrema.chuva.ui.home.AlertsSheet
 import com.giwnltrema.chuva.ui.home.HomeScreen
 import com.giwnltrema.chuva.ui.map.MapScreen
+import com.giwnltrema.chuva.ui.trip.TripScreen
 
 private data class Tab(val label: String, val icon: ImageVector, val selectedIcon: ImageVector)
 
 private val tabs = listOf(
     Tab("Previsão", Icons.Outlined.WaterDrop, Icons.Rounded.WaterDrop),
+    Tab("Trajeto", Icons.Outlined.Route, Icons.Rounded.Route),
     Tab("Mapa", Icons.Outlined.Map, Icons.Rounded.Map),
 )
 
@@ -39,6 +43,7 @@ fun ChuvaApp(vm: MainViewModel) {
     val home by vm.home.collectAsStateWithLifecycle()
     val map by vm.map.collectAsStateWithLifecycle()
     val alerts by vm.alerts.collectAsStateWithLifecycle()
+    val trip by vm.trip.collectAsStateWithLifecycle()
     var showAlerts by rememberSaveable { mutableStateOf(false) }
 
     if (showAlerts) {
@@ -63,9 +68,20 @@ fun ChuvaApp(vm: MainViewModel) {
             0 -> HomeScreen(
                 state = home,
                 onRefresh = vm::refresh,
-                onOpenMap = { selected = 1 },
+                onOpenMap = { selected = 2 },
                 onOpenAlerts = { showAlerts = true },
                 alertsOn = alerts.anyEnabled,
+                modifier = Modifier.padding(padding),
+            )
+            1 -> TripScreen(
+                state = trip,
+                onQuery = vm::onTripQuery,
+                onChoose = vm::chooseDestination,
+                onMode = vm::setTravelMode,
+                onTraffic = vm::setHeavyTraffic,
+                onSelect = vm::selectDeparture,
+                onRetry = vm::recomputeTrip,
+                onClear = vm::clearTrip,
                 modifier = Modifier.padding(padding),
             )
             else -> Box(Modifier.padding(bottom = padding.calculateBottomPadding())) {

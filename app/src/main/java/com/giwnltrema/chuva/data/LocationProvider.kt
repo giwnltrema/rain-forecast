@@ -38,7 +38,7 @@ class LocationProvider(private val context: Context) {
     }
 
     @Suppress("DEPRECATION")
-    private suspend fun reverseGeocode(lat: Double, lon: Double): String? = withContext(Dispatchers.IO) {
+    suspend fun reverseGeocode(lat: Double, lon: Double): String? = withContext(Dispatchers.IO) {
         if (!Geocoder.isPresent()) return@withContext null
         runCatching {
             Geocoder(context, Locale("pt", "BR")).getFromLocation(lat, lon, 1)?.firstOrNull()?.let { a ->

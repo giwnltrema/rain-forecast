@@ -21,6 +21,18 @@ com cara de Android moderno (Material You / Material 3).
 - Mesma escala de cor no radar e na previsão; garoa quase some, chuva de verdade fica forte.
 - Tema claro/escuro automático e cores do seu papel de parede (Android 12+).
 
+**Aba Trajeto — vai chover no caminho?**
+- Digite o destino (busca com autocompletar, guarda os recentes), escolha carro/bike/a pé.
+- O app traça a rota, calcula **a que horas você passa em cada trecho** e olha a chuva
+  naquele lugar naquela hora:
+  - até ~45 min à frente: **radar real projetado** — mede para onde a chuva está andando
+    (comparando radares de 30 min de diferença) e empurra ela para frente no tempo;
+  - depois disso: previsão do modelo, de 15 em 15 min.
+- Rota pintada no mapa: verde seco, amarelo/laranja/vermelho conforme a chuva.
+- Compara sair **agora, +15, +30 ou +1 h** e sugere o melhor horário.
+- "Trânsito": multiplica o tempo de carro por 1,8 (o roteador não conhece trânsito).
+- Falta de dado nunca aparece como "seco" (mostra "sem previsão").
+
 **Notificações** (sino no topo da tela)
 - **Aviso antes de chover**: checa a previsão de 15 em 15 min e avisa com 15, 30 ou 60 min de antecedência
   (*"Chuva em ~25 min em Pinheiros · Moderada · 1,8 mm na primeira hora"*). Avisa **uma vez por chuva**
@@ -36,6 +48,8 @@ com cara de Android moderno (Material You / Material 3).
 |---|---|
 | Previsão pontual e mapa de previsão | [Open-Meteo](https://open-meteo.com) (melhor modelo disponível para a região) |
 | Radar observado | [RainViewer](https://www.rainviewer.com/api.html) |
+| Busca de endereço | [Photon](https://photon.komoot.io) (OpenStreetMap) |
+| Rotas | [OSRM](https://routing.openstreetmap.de) (FOSSGIS / OpenStreetMap) |
 | Mapa base | [OpenFreeMap](https://openfreemap.org) © OpenMapTiles © OpenStreetMap |
 
 ### Radar manda no "agora", modelo no "depois"
@@ -76,6 +90,7 @@ app/src/main/java/com/giwnltrema/chuva/
 ├── notify/        # checagem periódica (WorkManager) e notificações
 ├── ui/home/       # tela de previsão
 ├── ui/map/        # radar + mapa de previsão (MapLibre)
+├── ui/trip/       # "vai chover no caminho?"
 └── ui/theme/      # Material 3 + escala de cores da chuva
 ```
 
