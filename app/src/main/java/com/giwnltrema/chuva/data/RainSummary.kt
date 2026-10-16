@@ -33,7 +33,7 @@ enum class Intensity(val label: String) {
     }
 }
 
-private const val WET_15MIN = 0.05 // mm em 15 min (~0,2 mm/h)
+internal const val WET_15MIN = 0.05 // mm em 15 min (~0,2 mm/h)
 private const val WET_HOUR = 0.2
 private const val LIKELY_PCT = 50
 
@@ -85,7 +85,7 @@ fun summarize(f: Forecast, now: Instant = Instant.now()): RainSummary {
     )
 }
 
-private fun relative(now: Instant, at: Instant, fmt: DateTimeFormatter): String {
+internal fun relative(now: Instant, at: Instant, fmt: DateTimeFormatter): String {
     val minutes = Duration.between(now, at).toMinutes()
     return when {
         minutes <= 5 -> "a qualquer momento"

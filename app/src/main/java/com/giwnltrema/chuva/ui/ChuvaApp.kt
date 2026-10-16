@@ -15,12 +15,14 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.giwnltrema.chuva.MainViewModel
+import com.giwnltrema.chuva.ui.home.AlertsSheet
 import com.giwnltrema.chuva.ui.home.HomeScreen
 import com.giwnltrema.chuva.ui.map.MapScreen
 
@@ -36,6 +38,12 @@ fun ChuvaApp(vm: MainViewModel) {
     var selected by rememberSaveable { mutableIntStateOf(0) }
     val home by vm.home.collectAsStateWithLifecycle()
     val map by vm.map.collectAsStateWithLifecycle()
+    val alerts by vm.alerts.collectAsStateWithLifecycle()
+    var showAlerts by rememberSaveable { mutableStateOf(false) }
+
+    if (showAlerts) {
+        AlertsSheet(settings = alerts, onChange = vm::updateAlerts, onDismiss = { showAlerts = false })
+    }
 
     Scaffold(
         bottomBar = {
@@ -56,6 +64,8 @@ fun ChuvaApp(vm: MainViewModel) {
                 state = home,
                 onRefresh = vm::refresh,
                 onOpenMap = { selected = 1 },
+                onOpenAlerts = { showAlerts = true },
+                alertsOn = alerts.anyEnabled,
                 modifier = Modifier.padding(padding),
             )
             else -> Box(Modifier.padding(bottom = padding.calculateBottomPadding())) {

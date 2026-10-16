@@ -3,12 +3,15 @@ package com.giwnltrema.chuva
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.giwnltrema.chuva.data.AlertSettings
+import com.giwnltrema.chuva.data.AlertStore
 import com.giwnltrema.chuva.data.Forecast
 import com.giwnltrema.chuva.data.ForecastGrid
 import com.giwnltrema.chuva.data.LocationProvider
 import com.giwnltrema.chuva.data.Place
 import com.giwnltrema.chuva.data.RadarFrame
 import com.giwnltrema.chuva.data.WeatherRepository
+import com.giwnltrema.chuva.notify.RainCheckWorker
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -37,6 +40,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val repo = WeatherRepository()
     private val locator = LocationProvider(app)
+    private val alertStore = AlertStore(app)
+
+    private val _alerts = MutableStateFlow(alertStore.settings)
+    val alerts: StateFlow<AlertSettings> = _alerts.asStateFlow()
 
     private val _home = MutableStateFlow(HomeState())
     val home: StateFlow<HomeState> = _home.asStateFlow()
@@ -53,6 +60,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             _home.update { it.copy(loading = true, error = null) }
             try {
                 val place = locator.currentPlace()
+                alertStore.lastPlace = place
                 _home.update { it.copy(place = place) }
                 val forecast = repo.forecast(place.lat, place.lon)
                 _home.update { it.copy(forecast = forecast, loading = false) }
@@ -85,6 +93,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 .onSuccess { grid -> _map.update { it.copy(grid = grid, loadingGrid = false) } }
                 .onFailure { e -> _map.update { it.copy(loadingGrid = false, error = e.friendly()) } }
         }
+    }
+
+    fun updateAlerts(settings: AlertSettings) {
+        alertStore.settings = settings
+        _alerts.value = settings
+        RainCheckWorker.sync(getApplication())
     }
 
     private fun Throwable.friendly(): String = when (this) {

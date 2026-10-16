@@ -19,6 +19,15 @@ com cara de Android moderno (Material You / Material 3).
 - Nomes de ruas/bairros ficam **por cima** da chuva, então dá para ler onde está chovendo.
 - Tema claro/escuro automático e cores do seu papel de parede (Android 12+).
 
+**Notificações** (sino no topo da tela)
+- **Aviso antes de chover**: checa a previsão de 15 em 15 min e avisa com 15, 30 ou 60 min de antecedência
+  (*"Chuva em ~25 min em Pinheiros · Moderada · 1,8 mm na primeira hora"*). Avisa **uma vez por chuva**
+  e só volta a avisar depois de uma hora seca.
+- **Silenciar à noite** (22h–7h).
+- **Resumo da manhã** (~6h30): vai chover hoje, a partir de que horas e quanto.
+- Por padrão usa o último lugar onde você abriu o app; permitindo localização *"o tempo todo"*,
+  os alertas acompanham você.
+
 ## Fontes de dados (todas gratuitas, sem chave)
 
 | O quê | Fonte |
@@ -52,7 +61,8 @@ Kotlin · Jetpack Compose · Material 3 · MapLibre · OkHttp · kotlinx.seriali
 
 ```
 app/src/main/java/com/giwnltrema/chuva/
-├── data/          # Open-Meteo, RainViewer, localização, "vai chover?" (RainSummary)
+├── data/          # Open-Meteo, RainViewer, localização, "vai chover?" e lógica dos alertas
+├── notify/        # checagem periódica (WorkManager) e notificações
 ├── ui/home/       # tela de previsão
 ├── ui/map/        # radar + mapa de previsão (MapLibre)
 └── ui/theme/      # Material 3 + escala de cores da chuva
@@ -65,6 +75,5 @@ gerados no CI e no seu PC se atualizem um por cima do outro. Não use essa chave
 
 ## Ideias para depois
 
-- Notificação "vai chover em 30 min" (WorkManager checando a cada 15 min).
 - Widget na tela inicial com a frase de resumo.
 - Locais favoritos (casa, trabalho).

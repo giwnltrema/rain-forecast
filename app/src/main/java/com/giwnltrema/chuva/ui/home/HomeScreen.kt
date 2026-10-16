@@ -22,6 +22,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.LocationOn
 import androidx.compose.material.icons.rounded.Map
+import androidx.compose.material.icons.rounded.NotificationsActive
+import androidx.compose.material.icons.rounded.NotificationsNone
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.WaterDrop
 import androidx.compose.material3.Button
@@ -30,6 +32,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -72,6 +75,8 @@ fun HomeScreen(
     state: HomeState,
     onRefresh: () -> Unit,
     onOpenMap: () -> Unit,
+    onOpenAlerts: () -> Unit,
+    alertsOn: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val forecast = state.forecast
@@ -85,19 +90,25 @@ fun HomeScreen(
             forecast == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
             }
-            else -> ForecastList(state, forecast, onOpenMap)
+            else -> ForecastList(state, forecast, onOpenMap, onOpenAlerts, alertsOn)
         }
     }
 }
 
 @Composable
-private fun ForecastList(state: HomeState, f: Forecast, onOpenMap: () -> Unit) {
+private fun ForecastList(
+    state: HomeState,
+    f: Forecast,
+    onOpenMap: () -> Unit,
+    onOpenAlerts: () -> Unit,
+    alertsOn: Boolean,
+) {
     LazyColumn(
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
         modifier = Modifier.fillMaxSize(),
     ) {
-        item { Header(state, f) }
+        item { Header(state, f, onOpenAlerts, alertsOn) }
         item { Hero(f) }
         if (f.nowcast.isNotEmpty()) item { NowcastCard(f, onOpenMap) }
         item { HourlyCard(f.hourly.take(24), f) }
@@ -115,7 +126,7 @@ private fun ForecastList(state: HomeState, f: Forecast, onOpenMap: () -> Unit) {
 }
 
 @Composable
-private fun Header(state: HomeState, f: Forecast) {
+private fun Header(state: HomeState, f: Forecast, onOpenAlerts: () -> Unit, alertsOn: Boolean) {
     val time = DateTimeFormatter.ofPattern("HH:mm", ptBR).withZone(f.offset).format(f.fetchedAt)
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
         Icon(Icons.Rounded.LocationOn, null, tint = MaterialTheme.colorScheme.primary)
@@ -127,6 +138,12 @@ private fun Header(state: HomeState, f: Forecast) {
                 else "Atualizado às $time",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        FilledTonalIconButton(onClick = onOpenAlerts) {
+            Icon(
+                if (alertsOn) Icons.Rounded.NotificationsActive else Icons.Rounded.NotificationsNone,
+                contentDescription = "Notificações",
             )
         }
     }
