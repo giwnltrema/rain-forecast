@@ -40,8 +40,10 @@ class RainCheckWorker(context: Context, params: WorkerParameters) : CoroutineWor
         if (!settings.anyEnabled) return Result.success()
 
         val place = locate(store) ?: return Result.success()
-        val forecast = runCatching { WeatherRepository().forecast(place.lat, place.lon) }
+        val repo = WeatherRepository()
+        val forecast = runCatching { repo.forecast(place.lat, place.lon) }
             .getOrElse { return Result.retry() }
+        val radar = if (settings.rainAlerts) repo.radarNow(place.lat, place.lon, clutter = store) else null
 
         val now = Instant.now()
         val local = now.atOffset(forecast.offset)
@@ -50,13 +52,13 @@ class RainCheckWorker(context: Context, params: WorkerParameters) : CoroutineWor
         val night = localTime >= LocalTime.of(22, 0) || localTime < LocalTime.of(7, 0)
 
         if (settings.rainAlerts) {
-            val alert = rainAlert(forecast, place.name, settings.leadMinutes, now)
+            val alert = rainAlert(forecast, radar, place.name, settings.leadMinutes, now)
             when {
                 alert != null && !store.episodeNotified && !(settings.quietNight && night) -> {
                     Notifier.rain(applicationContext, alert)
                     store.episodeNotified = true
                 }
-                alert == null && dryAhead(forecast, now) -> store.episodeNotified = false
+                alert == null && dryAhead(forecast, radar, settings.leadMinutes, now) -> store.episodeNotified = false
             }
         }
 

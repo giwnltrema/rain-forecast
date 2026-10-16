@@ -26,33 +26,33 @@ class RainAlertsTest {
     @Test
     fun noAlertWhenDry() {
         val f = forecast(List(12) { 0.0 })
-        assertNull(rainAlert(f, "Pinheiros", 30, now))
-        assertTrue(dryAhead(f, now))
+        assertNull(rainAlert(f, null, "Pinheiros", 30, now))
+        assertTrue(dryAhead(f, null, 30, now))
     }
 
     @Test
     fun alertWithinLeadTime() {
         // começa às 14h30 → 25 min
         val f = forecast(listOf(0.0, 0.0, 0.6, 1.0, 0.2) + List(7) { 0.0 })
-        val a = rainAlert(f, "Pinheiros", 30, now)!!
+        val a = rainAlert(f, null, "Pinheiros", 30, now)!!
         assertEquals("Chuva em ~25 min em Pinheiros", a.title)
         assertEquals("Moderada · 1,8 mm na primeira hora", a.text)
-        assertFalse(dryAhead(f, now))
+        assertFalse(dryAhead(f, null, 30, now))
     }
 
     @Test
     fun noAlertBeyondLeadTime() {
         // começa às 15h → 55 min: fora de 30 min, dentro de 1 h
         val f = forecast(List(4) { 0.0 } + listOf(0.5) + List(7) { 0.0 })
-        assertNull(rainAlert(f, "Pinheiros", 30, now))
-        assertEquals("Chuva em ~55 min em Pinheiros", rainAlert(f, "Pinheiros", 60, now)!!.title)
+        assertNull(rainAlert(f, null, "Pinheiros", 30, now))
+        assertEquals("Chuva em ~55 min em Pinheiros", rainAlert(f, null, "Pinheiros", 60, now)!!.title)
     }
 
     @Test
     fun rainingNow() {
         val f = forecast(listOf(0.4, 0.4) + List(10) { 0.0 }, currentMm = 1.2)
-        assertEquals("Está chovendo em Pinheiros", rainAlert(f, "Pinheiros", 15, now)!!.title)
-        assertFalse(dryAhead(f, now))
+        assertEquals("Está chovendo em Pinheiros", rainAlert(f, null, "Pinheiros", 15, now)!!.title)
+        assertFalse(dryAhead(f, null, 30, now))
     }
 
     @Test

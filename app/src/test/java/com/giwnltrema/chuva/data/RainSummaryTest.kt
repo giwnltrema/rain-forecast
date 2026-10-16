@@ -30,7 +30,7 @@ class RainSummaryTest {
 
     @Test
     fun dry() {
-        val s = summarize(forecast(List(12) { 0.0 }), now)
+        val s = summarize(forecast(List(12) { 0.0 }), now = now)
         assertEquals("Sem chuva nas próximas 24 h", s.headline)
         assertEquals(Intensity.NONE, s.level)
     }
@@ -38,14 +38,14 @@ class RainSummaryTest {
     @Test
     fun rainStartsSoon() {
         // começa no slot das 14h45 → ~40 min
-        val s = summarize(forecast(listOf(0.0, 0.0, 0.0, 0.8, 1.2, 0.4) + List(6) { 0.0 }), now)
+        val s = summarize(forecast(listOf(0.0, 0.0, 0.0, 0.8, 1.2, 0.4) + List(6) { 0.0 }), now = now)
         assertEquals("Chuva em ~40 min", s.headline)
         assertEquals(Intensity.MODERATE, s.level)
     }
 
     @Test
     fun rainingNowAndStopping() {
-        val s = summarize(forecast(listOf(0.5, 0.3, 0.0) + List(9) { 0.0 }, currentMm = 1.0), now)
+        val s = summarize(forecast(listOf(0.5, 0.3, 0.0) + List(9) { 0.0 }, currentMm = 1.0), now = now)
         assertEquals("Chovendo agora", s.headline)
         assertTrue(s.detail, s.detail.startsWith("Deve parar em ~25 min"))
     }
@@ -53,7 +53,7 @@ class RainSummaryTest {
     @Test
     fun rainLaterToday() {
         val hourly = List(24) { i -> if (i == 5) 3.0 to 80 else 0.0 to 10 }
-        val s = summarize(forecast(List(12) { 0.0 }, hourly), now)
+        val s = summarize(forecast(List(12) { 0.0 }, hourly), now = now)
         assertEquals("Chuva às 19h00 (80%)", s.headline)
     }
 

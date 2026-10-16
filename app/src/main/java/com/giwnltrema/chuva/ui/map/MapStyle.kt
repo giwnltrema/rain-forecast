@@ -8,6 +8,7 @@ import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.geometry.LatLngQuad
 import org.maplibre.android.maps.Style
 import org.maplibre.android.style.layers.CircleLayer
+import org.maplibre.android.style.layers.Layer
 import org.maplibre.android.style.layers.Property
 import org.maplibre.android.style.layers.PropertyFactory.circleColor
 import org.maplibre.android.style.layers.PropertyFactory.circleOpacity
@@ -19,40 +20,30 @@ import org.maplibre.android.style.layers.PropertyFactory.rasterOpacity
 import org.maplibre.android.style.layers.PropertyFactory.rasterResampling
 import org.maplibre.android.style.layers.PropertyFactory.visibility
 import org.maplibre.android.style.layers.RasterLayer
+import org.maplibre.android.style.layers.SymbolLayer
 import org.maplibre.android.style.sources.GeoJsonSource
 import org.maplibre.android.style.sources.ImageSource
 import org.maplibre.android.style.sources.RasterSource
 import org.maplibre.android.style.sources.TileSet
 import org.maplibre.geojson.Point
 
-private const val LABELS = "labels"
 private const val ME = "me"
 private const val FORECAST = "forecast"
 const val RADAR_OPACITY = 0.8f
 
 /**
- * Mapa base raster da CARTO, com os nomes de ruas/cidades numa camada separada
- * por cima da chuva, para continuarem legíveis.
+ * Mapa base vetorial do OpenFreeMap (gratuito, sem chave).
+ * Positron (claro) e Dark são discretos, bons para pôr chuva por cima.
  */
-fun baseStyleJson(dark: Boolean): String {
-    val base = if (dark) "dark_nolabels" else "rastertiles/voyager_nolabels"
-    val labels = if (dark) "dark_only_labels" else "rastertiles/voyager_only_labels"
-    fun tiles(path: String) = listOf("a", "b", "c", "d")
-        .joinToString(",") { "\"https://$it.basemaps.cartocdn.com/$path/{z}/{x}/{y}@2x.png\"" }
-    val attribution = "© <a href=\\\"https://www.openstreetmap.org/copyright\\\">OpenStreetMap</a> © <a href=\\\"https://carto.com/attributions\\\">CARTO</a> · Radar <a href=\\\"https://www.rainviewer.com\\\">RainViewer</a> · Previsão <a href=\\\"https://open-meteo.com\\\">Open-Meteo</a>"
-    return """
-    {
-      "version": 8,
-      "sources": {
-        "base": { "type": "raster", "tiles": [${tiles(base)}], "tileSize": 256, "maxzoom": 20, "attribution": "$attribution" },
-        "$LABELS": { "type": "raster", "tiles": [${tiles(labels)}], "tileSize": 256, "maxzoom": 20 }
-      },
-      "layers": [
-        { "id": "base", "type": "raster", "source": "base" },
-        { "id": "$LABELS", "type": "raster", "source": "$LABELS" }
-      ]
-    }
-    """.trimIndent()
+fun baseStyleUrl(dark: Boolean): String =
+    "https://tiles.openfreemap.org/styles/" + if (dark) "dark" else "positron"
+
+/** Camada de rótulos mais baixa: a chuva entra embaixo dela para nomes de ruas continuarem legíveis. */
+private fun Style.firstLabelLayer(): String? = layers.firstOrNull { it is SymbolLayer }?.id
+
+private fun Style.addBelowLabels(layer: Layer) {
+    val labels = firstLabelLayer()
+    if (labels != null) addLayerBelow(layer, labels) else addLayerBelow(layer, "$ME-halo")
 }
 
 fun Style.addUserMarker(place: Place, color: Int) {
@@ -80,15 +71,17 @@ fun Style.setRadarFrames(frames: List<RadarFrame>) {
     sources.filter { it.id.startsWith("radar-") }.forEach { removeSource(it) }
     frames.forEachIndexed { i, frame ->
         // O RainViewer gratuito só serve até o zoom 7; acima disso o MapLibre amplia (overzoom).
-        val tiles = TileSet("2.2.0", frame.tileUrl).apply { maxZoom = 7f }
+        val tiles = TileSet("2.2.0", frame.tileUrl).apply {
+            maxZoom = 7f
+            attribution = "Radar <a href=\"https://www.rainviewer.com\">RainViewer</a>"
+        }
         addSource(RasterSource("radar-$i", tiles, 256))
-        addLayerBelow(
+        addBelowLabels(
             RasterLayer("radar-$i", "radar-$i").withProperties(
                 rasterOpacity(0f),
                 rasterFadeDuration(0f),
                 rasterResampling(Property.RASTER_RESAMPLING_LINEAR),
             ),
-            LABELS,
         )
     }
 }
@@ -110,13 +103,12 @@ fun Style.setForecastImage(grid: ForecastGrid, image: Bitmap) {
     val source = getSourceAs<ImageSource>(FORECAST)
     if (source == null) {
         addSource(ImageSource(FORECAST, quad, image))
-        addLayerBelow(
+        addBelowLabels(
             RasterLayer(FORECAST, FORECAST).withProperties(
                 rasterOpacity(0.85f),
                 rasterFadeDuration(0f),
                 rasterResampling(Property.RASTER_RESAMPLING_LINEAR),
             ),
-            LABELS,
         )
     } else {
         source.setCoordinates(quad)

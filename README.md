@@ -34,10 +34,18 @@ com cara de Android moderno (Material You / Material 3).
 |---|---|
 | Previsão pontual e mapa de previsão | [Open-Meteo](https://open-meteo.com) (melhor modelo disponível para a região) |
 | Radar observado | [RainViewer](https://www.rainviewer.com/api.html) |
-| Mapa base | © OpenStreetMap, © CARTO |
+| Mapa base | [OpenFreeMap](https://openfreemap.org) © OpenMapTiles © OpenStreetMap |
 
-> O plano gratuito do RainViewer hoje só oferece o **passado** (~2 h) e até zoom 7 — acima disso
-> a imagem é ampliada. Por isso a parte "vai chover daqui a pouco" vem do modelo do Open-Meteo.
+### Radar manda no "agora", modelo no "depois"
+
+- **Está chovendo / chuva chegando** vem do **radar observado**: o app lê a intensidade (dBZ) dos tiles
+  do RainViewer num raio de 60 km, acha a chuva mais próxima e, comparando com o quadro de 30 min antes,
+  estima se ela está vindo e em quanto tempo.
+- **Previsão** (próximas horas/dias) vem do modelo do Open-Meteo, que erra bastante o "neste minuto".
+- **Filtro de clutter**: o radar vê prédios e torres (ex.: espigão da Paulista) como chuva parada.
+  Pixels com eco em ≥ metade dos quadros das últimas 2 h, com a vizinhança seca, são ignorados,
+  assim como pixels de chuva isolados. O mapa de radar ainda mostra essas manchas (os tiles vêm prontos).
+- O plano gratuito do RainViewer só tem o passado (~2 h) e zoom até 7 (~1 km por pixel).
 
 ## Instalar no celular
 
@@ -61,7 +69,7 @@ Kotlin · Jetpack Compose · Material 3 · MapLibre · OkHttp · kotlinx.seriali
 
 ```
 app/src/main/java/com/giwnltrema/chuva/
-├── data/          # Open-Meteo, RainViewer, localização, "vai chover?" e lógica dos alertas
+├── data/          # Open-Meteo, RainViewer (leitura do radar + filtro de clutter), "vai chover?", alertas
 ├── notify/        # checagem periódica (WorkManager) e notificações
 ├── ui/home/       # tela de previsão
 ├── ui/map/        # radar + mapa de previsão (MapLibre)

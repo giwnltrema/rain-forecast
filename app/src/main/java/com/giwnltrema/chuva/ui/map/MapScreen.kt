@@ -50,6 +50,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -121,7 +122,7 @@ fun MapScreen(
             m.setMaxZoomPreference(13.0)
             m.cameraPosition = CameraPosition.Builder().target(LatLng(place.lat, place.lon)).zoom(8.0).build()
             centeredOn = LatLng(place.lat, place.lon)
-            m.setStyle(Style.Builder().fromJson(baseStyleJson(dark))) { s ->
+            m.setStyle(Style.Builder().fromUri(baseStyleUrl(dark))) { s ->
                 s.addUserMarker(place, markerColor)
                 style = s
             }
@@ -321,7 +322,7 @@ private fun TimelineCard(
                     steps = (count - 2).coerceAtLeast(0),
                 )
             }
-            Legend()
+            if (mode == Mode.RADAR) RadarLegend() else Legend()
             state.error?.let {
                 Spacer(Modifier.height(6.dp))
                 Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelMedium)
@@ -366,6 +367,44 @@ private fun Legend() {
                 Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
+    }
+}
+
+/** Cores reais do radar (paleta Universal Blue do RainViewer). */
+private val radarStops = listOf(
+    Color(0x96CEC087), // 10 dBZ – garoa/ruído
+    Color(0xFF88DDEE), // 15
+    Color(0xFF00A3E0), // 20 – chuva fraca
+    Color(0xFF005588), // 30
+    Color(0xFFFFEE00), // 35 – moderada
+    Color(0xFFFF8100), // 44
+    Color(0xFFFF4400), // 45 – forte
+    Color(0xFFC10000), // 50
+    Color(0xFFFFAAFF), // 55 – muito forte / granizo
+)
+
+@Composable
+private fun RadarLegend() {
+    Column {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(8.dp)
+                .clip(RoundedCornerShape(50))
+                .background(Brush.horizontalGradient(radarStops)),
+        )
+        Spacer(Modifier.height(2.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            listOf("garoa", "fraca", "moderada", "forte", "extrema").forEach {
+                Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        Text(
+            "Manchas paradas no mesmo lugar (ex.: sobre a Paulista) costumam ser eco de prédios, não chuva.",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 4.dp),
+        )
     }
 }
 

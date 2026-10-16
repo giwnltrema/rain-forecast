@@ -37,7 +37,70 @@ internal const val WET_15MIN = 0.05 // mm em 15 min (~0,2 mm/h)
 private const val WET_HOUR = 0.2
 private const val LIKELY_PCT = 50
 
-fun summarize(f: Forecast, now: Instant = Instant.now()): RainSummary {
+/**
+ * Com radar recente, o "agora" vem do radar (observação) e o modelo só entra como previsão.
+ * Modelos numéricos erram bastante o "está chovendo neste minuto"; o radar não.
+ */
+fun summarize(f: Forecast, radar: RadarNow? = null, now: Instant = Instant.now()): RainSummary {
+    if (radar != null && radar.isFresh(now)) return summarizeWithRadar(f, radar, now)
+    return modelSummary(f, now)
+}
+
+private fun summarizeWithRadar(f: Forecast, r: RadarNow, now: Instant): RainSummary {
+    val fmt = DateTimeFormatter.ofPattern("HH'h'mm", Locale("pt", "BR")).withZone(f.offset)
+
+    if (r.rainingHere) {
+        val level = Intensity.ofRate(dbzToRate(r.dbzHere!!))
+        return RainSummary("Chovendo agora", "${level.label} segundo o radar · ${modelOutlook(f, now)}", level)
+    }
+
+    val near = r.nearestKm
+    if (near != null && near <= NEARBY_KM) {
+        val level = Intensity.ofRate(dbzToRate(r.maxDbzNearby ?: RAIN_DBZ))
+        val km = "~${near.roundToInt().coerceAtLeast(2)} km"
+        val eta = r.etaMinutes
+        return if (eta != null) {
+            RainSummary(
+                headline = "Chuva chegando ${relative(now, now.plusSeconds(eta * 60L), fmt)}",
+                detail = "${level.label} a $km, vindo na sua direção (radar)",
+                level = level,
+            )
+        } else {
+            RainSummary(
+                headline = "Chuva a $km",
+                detail = "${level.label}, sem sinal de vir para cá · ${modelOutlook(f, now)}",
+                level = Intensity.NONE,
+            )
+        }
+    }
+
+    return RainSummary(
+        headline = if (near == null) "Sem chuva por perto" else "Sem chuva agora",
+        detail = modelOutlook(f, now),
+        level = Intensity.NONE,
+    )
+}
+
+/** Raio considerado "perto" na tela inicial. */
+const val NEARBY_KM = 25.0
+
+/** Uma linha com o que o modelo prevê para as próximas 24 h. */
+fun modelOutlook(f: Forecast, now: Instant = Instant.now()): String {
+    val fmt = DateTimeFormatter.ofPattern("HH'h'", Locale("pt", "BR")).withZone(f.offset)
+    val next24 = f.hourly.filter { it.time.plusSeconds(3600).isAfter(now) }.take(24)
+    val total = next24.sumOf { it.mm }
+    val first = next24.firstOrNull { it.mm >= WET_HOUR || (it.probability ?: 0) >= LIKELY_PCT }
+        ?: return "Previsão: sem chuva nas próximas 24 h"
+    val prob = first.probability?.let { " ($it%)" }.orEmpty()
+    val label = Intensity.ofRate(maxOf(first.mm, WET_HOUR)).label.lowercase()
+    return if (!first.time.isAfter(now)) {
+        "Previsão: chuva $label nas próximas horas$prob · ${mm(total)} em 24 h"
+    } else {
+        "Previsão: chuva às ${fmt.format(first.time)}$prob · ${mm(total)} em 24 h"
+    }
+}
+
+private fun modelSummary(f: Forecast, now: Instant): RainSummary {
     val hourFmt = DateTimeFormatter.ofPattern("HH'h'mm", Locale("pt", "BR")).withZone(f.offset)
     val slots = f.nowcast
 

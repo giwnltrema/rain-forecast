@@ -1,5 +1,7 @@
 package com.giwnltrema.chuva.data
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -22,6 +24,8 @@ class WeatherRepository(
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .build(),
+    /** PNG → pixels ARGB 256x256 não pré-multiplicados (Android: BitmapFactory). */
+    private val decodeArgb: (ByteArray) -> IntArray? = ::decodePng,
 ) {
     private val json = Json { ignoreUnknownKeys = true; coerceInputValues = true }
 
@@ -39,9 +43,56 @@ class WeatherRepository(
 
     suspend fun radarFrames(): List<RadarFrame> = withContext(Dispatchers.IO) {
         val maps = json.decodeFromString<RvMaps>(get("https://api.rainviewer.com/public/weather-maps.json"))
-        (maps.radar.past + maps.radar.nowcast).map {
-            // 256 px, esquema de cor 2 (Universal Blue), suavizado + neve.
-            RadarFrame(Instant.ofEpochSecond(it.time), "${maps.host}${it.path}/256/{z}/{x}/{y}/2/1_1.png")
+        (maps.radar.past + maps.radar.nowcast).map { RadarFrame(Instant.ofEpochSecond(it.time), maps.host + it.path) }
+    }
+
+    /**
+     * Lê o radar observado em volta do ponto: se está chovendo ali, a que distância
+     * está a chuva mais próxima e se ela está se aproximando. null se o radar falhar.
+     * [clutter] guarda a máscara de ecos falsos entre chamadas (calculá-la baixa ~2 h de quadros).
+     */
+    suspend fun radarNow(
+        lat: Double,
+        lon: Double,
+        clutter: ClutterCache? = null,
+        frames: List<RadarFrame>? = null,
+    ): RadarNow? = withContext(Dispatchers.IO) {
+        runCatching {
+            val now = Instant.now()
+            val past = (frames ?: radarFrames()).filter { !it.time.isAfter(now) }
+            val latest = past.lastOrNull() ?: return@runCatching null
+            val earlier = past.lastOrNull { !it.time.isAfter(latest.time.minusSeconds(25 * 60)) }
+            val readers = past.associateWith { reader(it) }
+
+            val mask = clutter?.load(lat, lon, now)
+                ?: buildClutterMask(lat, lon, past.map { readers.getValue(it) })
+                    .also { clutter?.save(lat, lon, now, it) }
+
+            val latestScan = scanFrame(lat, lon, mask, readers.getValue(latest))
+            val earlierScan = earlier?.let { runCatching { scanFrame(lat, lon, mask, readers.getValue(it)) }.getOrNull() }
+            radarNow(latestScan, latest.time, earlierScan, earlier?.time)
+        }.getOrNull()
+    }
+
+    /** Lê pixels de um quadro, baixando cada tile uma vez só. */
+    private fun reader(frame: RadarFrame): FrameReader {
+        val tiles = HashMap<Long, IntArray?>()
+        return { x, y ->
+            val tx = Math.floorDiv(x, 256)
+            val ty = Math.floorDiv(y, 256)
+            val pixels = tiles.getOrPut(pixelKey(tx, ty)) {
+                // Sem suavização (0_0) para as cores baterem exatamente com a paleta.
+                getBytes("${frame.base}/256/$RADAR_ZOOM/$tx/$ty/2/0_0.png")?.let(decodeArgb)
+            }
+            pixels?.let { RadarPalette.dbzOf(it[Math.floorMod(y, 256) * 256 + Math.floorMod(x, 256)]) }
+        }
+    }
+
+    private fun getBytes(url: String): ByteArray? {
+        val request = Request.Builder().url(url).header("User-Agent", "Chuva-Android/1.0").build()
+        client.newCall(request).execute().use { resp ->
+            if (!resp.isSuccessful) return null
+            return resp.body?.bytes()
         }
     }
 
@@ -149,4 +200,14 @@ internal fun OmResponse.toForecast(now: Instant = Instant.now()): Forecast {
         offset = offset,
         fetchedAt = now,
     )
+}
+
+private fun decodePng(bytes: ByteArray): IntArray? {
+    val opts = BitmapFactory.Options().apply {
+        inPremultiplied = false
+        inPreferredConfig = Bitmap.Config.ARGB_8888
+    }
+    val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts) ?: return null
+    if (bmp.width != 256 || bmp.height != 256) return null
+    return IntArray(256 * 256).also { bmp.getPixels(it, 0, 256, 0, 0, 256, 256); bmp.recycle() }
 }

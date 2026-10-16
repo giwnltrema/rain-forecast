@@ -56,6 +56,7 @@ import com.giwnltrema.chuva.data.Forecast
 import com.giwnltrema.chuva.data.HourSlot
 import com.giwnltrema.chuva.data.Intensity
 import com.giwnltrema.chuva.data.NowcastSlot
+import com.giwnltrema.chuva.data.RadarNow
 import com.giwnltrema.chuva.data.mm
 import com.giwnltrema.chuva.data.summarize
 import com.giwnltrema.chuva.ui.theme.RainScale
@@ -109,13 +110,13 @@ private fun ForecastList(
         modifier = Modifier.fillMaxSize(),
     ) {
         item { Header(state, f, onOpenAlerts, alertsOn) }
-        item { Hero(f) }
+        item { Hero(f, state.radar) }
         if (f.nowcast.isNotEmpty()) item { NowcastCard(f, onOpenMap) }
         item { HourlyCard(f.hourly.take(24), f) }
         item { DailyCard(f.daily) }
         item {
             Text(
-                "Previsão: Open-Meteo · Radar: RainViewer · Mapa: © OpenStreetMap, CARTO",
+                "Previsão: Open-Meteo · Radar: RainViewer · Mapa: OpenFreeMap © OpenMapTiles © OpenStreetMap",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
@@ -150,8 +151,12 @@ private fun Header(state: HomeState, f: Forecast, onOpenAlerts: () -> Unit, aler
 }
 
 @Composable
-private fun Hero(f: Forecast) {
-    val summary = summarize(f)
+private fun Hero(f: Forecast, radar: RadarNow?) {
+    val summary = summarize(f, radar)
+    // O código de tempo do modelo pode dizer "garoa" com o radar seco: o radar manda.
+    val radarDry = radar != null && radar.isFresh(f.fetchedAt) && !radar.rainingHere
+    val code = if (radarDry && f.current.weatherCode in RAIN_CODES) 3 else f.current.weatherCode
+    val label = if (radarDry && f.current.weatherCode in RAIN_CODES) "Sem chuva no radar" else weatherLabel(code)
     val scheme = MaterialTheme.colorScheme
     val accent = when (summary.level) {
         Intensity.NONE -> scheme.primaryContainer
@@ -178,7 +183,7 @@ private fun Hero(f: Forecast) {
                 )
                 Spacer(Modifier.weight(1f))
                 Icon(
-                    weatherIcon(f.current.weatherCode, f.current.isDay),
+                    weatherIcon(code, f.current.isDay),
                     contentDescription = null,
                     tint = onAccent,
                     modifier = Modifier.size(56.dp),
@@ -186,7 +191,7 @@ private fun Hero(f: Forecast) {
             }
             Text(
                 buildString {
-                    append(weatherLabel(f.current.weatherCode))
+                    append(label)
                     f.current.apparent?.let { append(" · sensação ${it.roundToInt()}°") }
                 },
                 style = MaterialTheme.typography.bodyMedium,
@@ -199,6 +204,8 @@ private fun Hero(f: Forecast) {
         }
     }
 }
+
+private val RAIN_CODES = setOf(51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82, 95, 96, 99)
 
 private fun Color.compositeOver(bg: Color): Color {
     val a = alpha
@@ -227,7 +234,7 @@ private fun SectionCard(title: String, trailing: @Composable () -> Unit = {}, co
 private fun NowcastCard(f: Forecast, onOpenMap: () -> Unit) {
     val total = f.nowcast.sumOf { it.mm }
     SectionCard(
-        title = "Próximas 3 horas",
+        title = "Próximas 3 horas · previsão",
         trailing = {
             Text(mm(total), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
         },

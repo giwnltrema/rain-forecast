@@ -1,7 +1,9 @@
 package com.giwnltrema.chuva.data
 
 import android.content.Context
+import java.time.Instant
 import java.time.LocalDate
+import kotlin.math.abs
 
 data class AlertSettings(
     /** Avisar quando a chuva estiver para começar. */
@@ -17,7 +19,7 @@ data class AlertSettings(
 }
 
 /** Preferências + estado dos alertas (SharedPreferences: simples e síncrono, bom para o worker). */
-class AlertStore(context: Context) {
+class AlertStore(context: Context) : ClutterCache {
     private val prefs = context.getSharedPreferences("alerts", Context.MODE_PRIVATE)
 
     var settings: AlertSettings
@@ -61,4 +63,25 @@ class AlertStore(context: Context) {
     var lastMorning: LocalDate?
         get() = prefs.getString("morningDate", null)?.let(LocalDate::parse)
         set(v) = prefs.edit().putString("morningDate", v?.toString()).apply()
+
+    // --- Máscara de clutter do radar: vale por 3 h e enquanto você estiver a menos de ~10 km.
+
+    override fun load(lat: Double, lon: Double, now: Instant): Set<Long>? {
+        val at = prefs.getLong("clutterAt", 0)
+        if (now.epochSecond - at > 3 * 3600) return null
+        val cLat = prefs.getFloat("clutterLat", 0f)
+        val cLon = prefs.getFloat("clutterLon", 0f)
+        if (abs(cLat - lat) > 0.09 || abs(cLon - lon) > 0.09) return null
+        val raw = prefs.getString("clutter", null) ?: return null
+        return if (raw.isEmpty()) emptySet() else raw.split(',').mapNotNullTo(HashSet()) { it.toLongOrNull() }
+    }
+
+    override fun save(lat: Double, lon: Double, now: Instant, mask: Set<Long>) {
+        prefs.edit()
+            .putLong("clutterAt", now.epochSecond)
+            .putFloat("clutterLat", lat.toFloat())
+            .putFloat("clutterLon", lon.toFloat())
+            .putString("clutter", mask.joinToString(","))
+            .apply()
+    }
 }

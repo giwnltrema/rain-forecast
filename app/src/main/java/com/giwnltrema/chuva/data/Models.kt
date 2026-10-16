@@ -50,7 +50,10 @@ data class Forecast(
     val fetchedAt: Instant,
 )
 
-data class RadarFrame(val time: Instant, val tileUrl: String)
+data class RadarFrame(val time: Instant, val base: String) {
+    /** Tiles para exibir: esquema 2 (Universal Blue), suavizado + neve. */
+    val tileUrl get() = "$base/256/{z}/{x}/{y}/2/1_1.png"
+}
 
 /**
  * Grade regular de previsão em volta de um ponto.

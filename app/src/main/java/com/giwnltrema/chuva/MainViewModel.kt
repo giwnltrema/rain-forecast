@@ -10,9 +10,12 @@ import com.giwnltrema.chuva.data.ForecastGrid
 import com.giwnltrema.chuva.data.LocationProvider
 import com.giwnltrema.chuva.data.Place
 import com.giwnltrema.chuva.data.RadarFrame
+import com.giwnltrema.chuva.data.RadarNow
 import com.giwnltrema.chuva.data.WeatherRepository
 import com.giwnltrema.chuva.notify.RainCheckWorker
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -24,6 +27,8 @@ import java.time.Instant
 data class HomeState(
     val place: Place? = null,
     val forecast: Forecast? = null,
+    /** Radar observado em volta de você (null = indisponível). */
+    val radar: RadarNow? = null,
     val loading: Boolean = false,
     val error: String? = null,
 )
@@ -62,8 +67,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 val place = locator.currentPlace()
                 alertStore.lastPlace = place
                 _home.update { it.copy(place = place) }
-                val forecast = repo.forecast(place.lat, place.lon)
-                _home.update { it.copy(forecast = forecast, loading = false) }
+                coroutineScope {
+                    val radar = async { repo.radarNow(place.lat, place.lon, clutter = alertStore) }
+                    val forecast = repo.forecast(place.lat, place.lon)
+                    _home.update { it.copy(forecast = forecast, radar = radar.await(), loading = false) }
+                }
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 _home.update { it.copy(loading = false, error = e.friendly()) }

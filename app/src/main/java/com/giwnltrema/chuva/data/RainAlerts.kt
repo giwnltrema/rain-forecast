@@ -4,6 +4,7 @@ import java.time.Duration
 import java.time.Instant
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlin.math.roundToInt
 
 data class Alert(val title: String, val text: String)
 
@@ -15,11 +16,50 @@ private fun Forecast.rainingNow(now: Instant): Boolean {
         (first != null && first.mm >= WET_15MIN && !first.time.isAfter(now))
 }
 
+/** Distância que a chuva percorre em [leadMinutes] (~30 km/h, típico em SP), mín. 5 km. */
+fun alertRadiusKm(leadMinutes: Int) = maxOf(5.0, leadMinutes * 0.5)
+
 /**
  * Alerta de chuva começando dentro de [leadMinutes] (ou já chovendo).
+ * Com radar recente, só avisa o que o radar confirma (evita alarme falso do modelo).
  * null quando não há nada para avisar.
  */
-fun rainAlert(f: Forecast, place: String, leadMinutes: Int, now: Instant = Instant.now()): Alert? {
+fun rainAlert(
+    f: Forecast,
+    radar: RadarNow?,
+    place: String,
+    leadMinutes: Int,
+    now: Instant = Instant.now(),
+): Alert? {
+    if (radar != null && radar.isFresh(now)) return radarAlert(f, radar, place, leadMinutes, now)
+    return modelAlert(f, place, leadMinutes, now)
+}
+
+private fun radarAlert(f: Forecast, r: RadarNow, place: String, leadMinutes: Int, now: Instant): Alert? {
+    if (r.rainingHere) {
+        val level = Intensity.ofRate(dbzToRate(r.dbzHere!!))
+        return Alert("Está chovendo em $place", "${level.label} segundo o radar")
+    }
+    val near = r.nearestKm ?: return null
+    val radius = alertRadiusKm(leadMinutes)
+    val eta = r.etaMinutes
+    val coming = eta != null && eta <= leadMinutes + 10
+    if (near > radius || !(coming || near <= radius / 2)) return null
+
+    val level = Intensity.ofRate(dbzToRate(r.maxDbzNearby ?: RAIN_DBZ)).label.lowercase()
+    val km = "~${near.roundToInt().coerceAtLeast(2)} km"
+    val fmt = DateTimeFormatter.ofPattern("HH'h'mm", ptBR).withZone(f.offset)
+    return if (coming) {
+        Alert(
+            "Chuva ${relative(now, now.plusSeconds(eta!! * 60L), fmt)} em $place",
+            "Radar: chuva $level a $km, vindo na sua direção",
+        )
+    } else {
+        Alert("Chuva a $km de $place", "Radar: chuva $level bem perto de você")
+    }
+}
+
+private fun modelAlert(f: Forecast, place: String, leadMinutes: Int, now: Instant): Alert? {
     val fmt = DateTimeFormatter.ofPattern("HH'h'mm", ptBR).withZone(f.offset)
 
     if (f.rainingNow(now)) {
@@ -41,8 +81,11 @@ fun rainAlert(f: Forecast, place: String, leadMinutes: Int, now: Instant = Insta
     )
 }
 
-/** Próxima hora seca: usado para "rearmar" o alerta depois de um episódio de chuva. */
-fun dryAhead(f: Forecast, now: Instant = Instant.now()): Boolean {
+/** Sem chuva por perto: usado para "rearmar" o alerta depois de um episódio de chuva. */
+fun dryAhead(f: Forecast, radar: RadarNow?, leadMinutes: Int, now: Instant = Instant.now()): Boolean {
+    if (radar != null && radar.isFresh(now)) {
+        return !radar.rainingHere && (radar.nearestKm ?: Double.MAX_VALUE) > alertRadiusKm(leadMinutes)
+    }
     if (f.rainingNow(now)) return false
     val limit = now.plus(Duration.ofMinutes(60))
     return f.nowcast.none { it.mm >= WET_15MIN && it.time.isBefore(limit) }
