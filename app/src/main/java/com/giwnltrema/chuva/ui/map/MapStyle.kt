@@ -2,6 +2,19 @@ package com.giwnltrema.chuva.ui.map
 
 import android.graphics.Bitmap
 import com.giwnltrema.chuva.data.Place
+import com.giwnltrema.chuva.data.SavedPlace
+import org.maplibre.android.style.expressions.Expression.get
+import org.maplibre.android.style.layers.PropertyFactory.textAllowOverlap
+import org.maplibre.android.style.layers.PropertyFactory.textAnchor
+import org.maplibre.android.style.layers.PropertyFactory.textColor
+import org.maplibre.android.style.layers.PropertyFactory.textField
+import org.maplibre.android.style.layers.PropertyFactory.textFont
+import org.maplibre.android.style.layers.PropertyFactory.textHaloColor
+import org.maplibre.android.style.layers.PropertyFactory.textHaloWidth
+import org.maplibre.android.style.layers.PropertyFactory.textOffset
+import org.maplibre.android.style.layers.PropertyFactory.textSize
+import org.maplibre.geojson.Feature
+import org.maplibre.geojson.FeatureCollection
 import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.geometry.LatLngQuad
 import org.maplibre.android.maps.Style
@@ -23,6 +36,7 @@ import org.maplibre.android.style.sources.ImageSource
 import org.maplibre.geojson.Point
 
 private const val ME = "me"
+private const val PLACES = "places"
 const val RADAR = "radar"
 const val FORECAST = "forecast"
 
@@ -57,6 +71,40 @@ fun Style.addUserMarker(place: Place, color: Int) {
     )
 }
 
+/** Seus lugares salvos (Casa, Trabalho…) como bolinhas com nome no mapa. */
+fun Style.addPlaceMarkers() {
+    addSource(GeoJsonSource(PLACES))
+    addLayer(
+        CircleLayer(PLACES, PLACES).withProperties(
+            circleRadius(6f),
+            circleColor("#202124"),
+            circleStrokeColor("#FFFFFF"),
+            circleStrokeWidth(2.5f),
+        ),
+    )
+    addLayer(
+        SymbolLayer("$PLACES-label", PLACES).withProperties(
+            textField(get("name")),
+            textFont(arrayOf("Noto Sans Regular")),
+            textSize(12f),
+            textColor("#202124"),
+            textHaloColor("#FFFFFF"),
+            textHaloWidth(1.5f),
+            textOffset(arrayOf(0f, 1.2f)),
+            textAnchor(Property.TEXT_ANCHOR_TOP),
+            textAllowOverlap(true),
+        ),
+    )
+}
+
+fun Style.setPlaceMarkers(places: List<SavedPlace>) {
+    getSourceAs<GeoJsonSource>(PLACES)?.setGeoJson(
+        FeatureCollection.fromFeatures(
+            places.map { p -> Feature.fromGeometry(Point.fromLngLat(p.lon, p.lat)).apply { addStringProperty("name", p.name) } },
+        ),
+    )
+}
+
 fun Style.moveUserMarker(place: Place) {
     getSourceAs<GeoJsonSource>(ME)?.setGeoJson(Point.fromLngLat(place.lon, place.lat))
 }
@@ -66,7 +114,9 @@ fun Style.moveUserMarker(place: Place) {
  * (ruas, bairros, cidades), para dar para ler onde está chovendo.
  */
 private fun Style.addAboveRoads(layer: RasterLayer) {
-    val lastShape = layers.lastOrNull { it !is SymbolLayer && !it.id.startsWith(ME) && it.id != RADAR && it.id != FORECAST }
+    val lastShape = layers.lastOrNull {
+        it !is SymbolLayer && !it.id.startsWith(ME) && !it.id.startsWith(PLACES) && it.id != RADAR && it.id != FORECAST
+    }
     if (lastShape != null) addLayerAbove(layer, lastShape.id) else addLayerBelow(layer, "$ME-halo")
 }
 

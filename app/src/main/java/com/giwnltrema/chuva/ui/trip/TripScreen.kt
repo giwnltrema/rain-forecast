@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -39,6 +40,7 @@ import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Traffic
 import androidx.compose.material.icons.rounded.Umbrella
 import androidx.compose.material.icons.rounded.WbSunny
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -72,10 +74,12 @@ import com.giwnltrema.chuva.TripState
 import com.giwnltrema.chuva.data.Destination
 import com.giwnltrema.chuva.data.Intensity
 import com.giwnltrema.chuva.data.RADAR_HORIZON_MIN
+import com.giwnltrema.chuva.data.SavedPlace
 import com.giwnltrema.chuva.data.TravelMode
 import com.giwnltrema.chuva.data.TripPlan
 import com.giwnltrema.chuva.data.distanceKm
 import com.giwnltrema.chuva.data.summarizeTrip
+import com.giwnltrema.chuva.ui.home.icon
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlin.math.roundToInt
@@ -93,6 +97,7 @@ fun TripScreen(
     onRetry: () -> Unit,
     onClear: () -> Unit,
     modifier: Modifier = Modifier,
+    saved: List<SavedPlace> = emptyList(),
 ) {
     val focus = LocalFocusManager.current
     val listState = rememberLazyListState()
@@ -135,9 +140,21 @@ fun TripScreen(
                 PlaceRow(d, Icons.Rounded.Place, state.origin) { focus.clearFocus(); onChoose(d) }
             }
             state.destination == null -> {
-                if (state.recents.isEmpty()) {
+                if (saved.isNotEmpty()) item {
+                    // Atalhos: seus lugares salvos (Casa, Trabalho…) sem precisar digitar.
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(saved, key = { it.id }) { p ->
+                            AssistChip(
+                                onClick = { focus.clearFocus(); onChoose(p.toDestination()) },
+                                label = { Text(p.name, maxLines = 1, softWrap = false) },
+                                leadingIcon = { Icon(p.kind.icon(), null, Modifier.size(18.dp)) },
+                            )
+                        }
+                    }
+                }
+                if (state.recents.isEmpty() && saved.isEmpty()) {
                     item { EmptyHint() }
-                } else {
+                } else if (state.recents.isNotEmpty()) {
                     item { Text("Recentes", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     items(state.recents) { d -> PlaceRow(d, Icons.Rounded.History, state.origin) { focus.clearFocus(); onChoose(d) } }
                 }

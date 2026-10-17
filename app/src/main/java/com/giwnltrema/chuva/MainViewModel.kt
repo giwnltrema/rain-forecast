@@ -11,6 +11,8 @@ import com.giwnltrema.chuva.data.ForecastGrid
 import com.giwnltrema.chuva.data.LocationProvider
 import com.giwnltrema.chuva.data.Nowcaster
 import com.giwnltrema.chuva.data.Place
+import com.giwnltrema.chuva.data.SavedPlace
+import com.giwnltrema.chuva.data.PlacesStore
 import com.giwnltrema.chuva.data.RadarArea
 import com.giwnltrema.chuva.data.RadarNow
 import com.giwnltrema.chuva.data.Route
@@ -40,12 +42,18 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 data class HomeState(
+    /** Lugar cuja previsão está na tela (sua localização ou um lugar salvo). */
     val place: Place? = null,
     val forecast: Forecast? = null,
     /** Radar observado em volta de você (null = indisponível). */
     val radar: RadarNow? = null,
     val loading: Boolean = false,
     val error: String? = null,
+    /** Onde você está agora (o mapa e o Trajeto partem daqui). */
+    val here: Place? = null,
+    val places: List<SavedPlace> = emptyList(),
+    /** Lugar salvo selecionado; null = "Aqui". */
+    val selected: String? = null,
 )
 
 data class MapState(
@@ -97,7 +105,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _alerts = MutableStateFlow(alertStore.settings)
     val alerts: StateFlow<AlertSettings> = _alerts.asStateFlow()
 
-    private val _home = MutableStateFlow(HomeState())
+    private val placesStore = PlacesStore(app)
+    private val _home = MutableStateFlow(HomeState(places = placesStore.places))
     val home: StateFlow<HomeState> = _home.asStateFlow()
 
     private val _map = MutableStateFlow(MapState())
@@ -113,47 +122,142 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun refresh() {
         homeJob?.cancel()
+        val saved = _home.value.places.find { it.id == _home.value.selected }
         homeJob = viewModelScope.launch {
-            if (_home.value.forecast == null) {
-                alertStore.loadForecast()?.let { cached ->
-                    runCatching { repo.parseForecast(cached.body, cached.fetchedAt) }.onSuccess { f ->
-                        _home.update { it.copy(place = cached.place, forecast = f) }
-                    }
-                }
-            }
-            _home.update { it.copy(loading = true, error = null) }
-            try {
-                val located = locator.currentPlace()
-                // Nome provisório: o último conhecido se ainda estiver perto (< 1 km).
-                val known = alertStore.lastPlace
-                val place = if (!located.isFallback && known != null &&
-                    distanceKm(known.lat, known.lon, located.lat, located.lon) < 1.0
-                ) located.copy(name = known.name) else located
-                _home.update { it.copy(place = place) }
-
-                coroutineScope {
-                    if (!place.isFallback) launch {
-                        locator.reverseGeocode(place.lat, place.lon)?.let { name ->
-                            val named = place.copy(name = name)
-                            alertStore.lastPlace = named
-                            _home.update { it.copy(place = named) }
-                        } ?: run { alertStore.lastPlace = place }
-                    }
-                    launch {
-                        val radar = repo.radarNow(place.lat, place.lon, clutter = alertStore)
-                        _home.update { it.copy(radar = radar) }
-                    }
-                    val now = Instant.now()
-                    val body = repo.forecastRaw(place.lat, place.lon)
-                    val forecast = repo.parseForecast(body, now)
-                    _home.update { it.copy(forecast = forecast, loading = false) }
-                    alertStore.saveForecast(_home.value.place ?: place, body, now)
-                }
-            } catch (e: Exception) {
-                if (e is kotlinx.coroutines.CancellationException) throw e
-                _home.update { it.copy(loading = false, error = e.friendly()) }
+            if (saved == null) refreshHere() else {
+                launch { locateQuietly() }
+                refreshSaved(saved)
             }
         }
+    }
+
+    private suspend fun refreshHere() {
+        if (_home.value.forecast == null) {
+            alertStore.loadForecast()?.let { cached ->
+                runCatching { repo.parseForecast(cached.body, cached.fetchedAt) }.onSuccess { f ->
+                    _home.update { it.copy(place = cached.place, forecast = f) }
+                }
+            }
+        }
+        _home.update { it.copy(loading = true, error = null) }
+        try {
+            val located = locator.currentPlace()
+            // Nome provisório: o último conhecido se ainda estiver perto (< 1 km).
+            val known = alertStore.lastPlace
+            val place = if (!located.isFallback && known != null &&
+                distanceKm(known.lat, known.lon, located.lat, located.lon) < 1.0
+            ) located.copy(name = known.name) else located
+            _home.update { it.copy(place = place, here = place) }
+
+            coroutineScope {
+                if (!place.isFallback) launch {
+                    locator.reverseGeocode(place.lat, place.lon)?.let { name ->
+                        val named = place.copy(name = name)
+                        alertStore.lastPlace = named
+                        _home.update { h -> h.copy(here = named, place = if (h.selected == null) named else h.place) }
+                    } ?: run { alertStore.lastPlace = place }
+                }
+                launch {
+                    val radar = repo.radarNow(place.lat, place.lon, clutter = alertStore)
+                    _home.update { it.copy(radar = radar) }
+                }
+                val now = Instant.now()
+                val body = repo.forecastRaw(place.lat, place.lon)
+                val forecast = repo.parseForecast(body, now)
+                _home.update { it.copy(forecast = forecast, loading = false) }
+                alertStore.saveForecast(_home.value.place ?: place, body, now)
+            }
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            _home.update { it.copy(loading = false, error = e.friendly()) }
+        }
+    }
+
+    /** Atualiza só "onde você está" (para o mapa/trajeto) sem mexer no que está na tela. */
+    private suspend fun locateQuietly() {
+        runCatching { locator.currentPlace() }.onSuccess { located ->
+            val known = alertStore.lastPlace
+            val here = if (!located.isFallback && known != null &&
+                distanceKm(known.lat, known.lon, located.lat, located.lon) < 1.0
+            ) located.copy(name = known.name) else located
+            _home.update { it.copy(here = here) }
+        }
+    }
+
+    /** Previsão + radar de um lugar salvo (com cache próprio, para abrir na hora). */
+    private suspend fun refreshSaved(sp: SavedPlace) {
+        val place = sp.toPlace()
+        if (_home.value.forecast == null) {
+            alertStore.loadForecast(key = sp.id)?.let { cached ->
+                runCatching { repo.parseForecast(cached.body, cached.fetchedAt) }
+                    .onSuccess { f -> _home.update { it.copy(forecast = f) } }
+            }
+        }
+        _home.update { it.copy(place = place, loading = true, error = null) }
+        try {
+            coroutineScope {
+                launch {
+                    val radar = repo.radarNow(place.lat, place.lon, clutter = alertStore)
+                    _home.update { if (it.selected == sp.id) it.copy(radar = radar) else it }
+                }
+                val now = Instant.now()
+                val body = repo.forecastRaw(place.lat, place.lon)
+                val forecast = repo.parseForecast(body, now)
+                _home.update { if (it.selected == sp.id) it.copy(forecast = forecast, loading = false) else it }
+                alertStore.saveForecast(place, body, now, key = sp.id)
+            }
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            _home.update { it.copy(loading = false, error = e.friendly()) }
+        }
+    }
+
+    // --- Lugares salvos ---
+
+    /** Troca o lugar da aba Previsão (null = sua localização). */
+    fun selectPlace(id: String?) {
+        if (id == _home.value.selected && _home.value.forecast != null) return
+        val sp = _home.value.places.find { it.id == id }
+        _home.update {
+            it.copy(
+                selected = sp?.id,
+                place = sp?.toPlace() ?: it.here,
+                forecast = null,
+                radar = null,
+                error = null,
+            )
+        }
+        refresh()
+    }
+
+    fun savePlace(p: SavedPlace) {
+        placesStore.upsert(p)
+        _home.update { it.copy(places = placesStore.places) }
+        if (_home.value.selected == p.id) {
+            _home.update { it.copy(place = p.toPlace(), forecast = null, radar = null) }
+            refresh()
+        }
+    }
+
+    fun deletePlace(id: String) {
+        placesStore.remove(id)
+        _home.update { it.copy(places = placesStore.places) }
+        if (_home.value.selected == id) selectPlace(null)
+    }
+
+    /** Busca de endereço para cadastrar um lugar (mesma busca do Trajeto). */
+    suspend fun searchAddress(q: String): List<Destination> {
+        val near = _home.value.here ?: _home.value.place ?: LocationProvider.SAO_PAULO
+        return runCatching {
+            tripRepo.search(q.trim(), near.lat, near.lon) { name -> locator.searchByName(name, near.lat, near.lon) }
+        }.getOrDefault(emptyList())
+    }
+
+    /** Sua posição atual com nome do bairro, para "salvar onde estou". */
+    suspend fun currentAddress(): Destination? {
+        val p = runCatching { locator.currentPlace() }.getOrNull()?.takeUnless { it.isFallback } ?: return null
+        val name = locator.reverseGeocode(p.lat, p.lon) ?: "Minha localização"
+        return Destination(name, "Localização atual", p.lat, p.lon)
     }
 
     /** Recarrega o radar se tiver mais de 5 min (o RainViewer atualiza a cada 10). */
@@ -201,7 +305,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
         searchJob = viewModelScope.launch {
             delay(350) // espera parar de digitar
-            val near = _home.value.place ?: LocationProvider.SAO_PAULO
+            val near = _home.value.here ?: _home.value.place ?: LocationProvider.SAO_PAULO
             _trip.update { it.copy(origin = near.lat to near.lon) }
             runCatching {
                 tripRepo.search(q.trim(), near.lat, near.lon) { name -> locator.searchByName(name, near.lat, near.lon) }
@@ -241,7 +345,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         tripJob = viewModelScope.launch {
             _trip.update { it.copy(loading = true, error = null) }
             try {
-                val from = _home.value.place?.takeUnless { it.isFallback } ?: locator.currentPlace()
+                val from = _home.value.here?.takeUnless { it.isFallback } ?: locator.currentPlace()
                 val t = _trip.value
                 val route = tripRepo.route(from.lat, from.lon, dest, t.mode)
                 // Carro em trânsito pesado de SP: ~1,8x o tempo "de rua vazia" do OSRM.

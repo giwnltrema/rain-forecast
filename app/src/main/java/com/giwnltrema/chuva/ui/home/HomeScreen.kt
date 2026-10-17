@@ -49,6 +49,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import com.giwnltrema.chuva.data.SavedPlace
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.giwnltrema.chuva.HomeState
 import com.giwnltrema.chuva.data.DaySlot
@@ -78,68 +80,80 @@ fun HomeScreen(
     onOpenMap: () -> Unit,
     onOpenAlerts: () -> Unit,
     alertsOn: Boolean,
+    onSelectPlace: (String?) -> Unit,
+    onEditPlace: (SavedPlace?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val forecast = state.forecast
+    val f = state.forecast
     PullToRefreshBox(
-        isRefreshing = state.loading && forecast != null,
+        isRefreshing = state.loading && f != null,
         onRefresh = onRefresh,
         modifier = modifier.fillMaxSize(),
     ) {
-        when {
-            forecast == null && state.error != null -> ErrorState(state.error, onRefresh)
-            forecast == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
+        LazyColumn(
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            item { Header(state, f, onOpenAlerts, alertsOn) }
+            // Os chips ficam sempre na tela, mesmo enquanto a previsão do lugar carrega.
+            item {
+                PlaceChips(
+                    places = state.places,
+                    selected = state.selected,
+                    onSelect = onSelectPlace,
+                    onEdit = onEditPlace,
+                )
             }
-            else -> ForecastList(state, forecast, onOpenMap, onOpenAlerts, alertsOn)
+            when {
+                f == null && state.error != null -> item { ErrorState(state.error, onRefresh) }
+                f == null -> item {
+                    Box(Modifier.fillMaxWidth().padding(vertical = 64.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
+                }
+                else -> {
+                    item { Hero(f, state.radar) }
+                    if (f.nowcast.isNotEmpty()) item { NowcastCard(f, onOpenMap) }
+                    item { HourlyCard(f.hourly.take(24), f) }
+                    item { DailyCard(f.daily) }
+                    item {
+                        Text(
+                            "Previsão: Open-Meteo · Radar: RainViewer · Mapa: OpenFreeMap © OpenMapTiles © OpenStreetMap",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                        )
+                    }
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun ForecastList(
-    state: HomeState,
-    f: Forecast,
-    onOpenMap: () -> Unit,
-    onOpenAlerts: () -> Unit,
-    alertsOn: Boolean,
-) {
-    LazyColumn(
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-        modifier = Modifier.fillMaxSize(),
-    ) {
-        item { Header(state, f, onOpenAlerts, alertsOn) }
-        item { Hero(f, state.radar) }
-        if (f.nowcast.isNotEmpty()) item { NowcastCard(f, onOpenMap) }
-        item { HourlyCard(f.hourly.take(24), f) }
-        item { DailyCard(f.daily) }
-        item {
-            Text(
-                "Previsão: Open-Meteo · Radar: RainViewer · Mapa: OpenFreeMap © OpenMapTiles © OpenStreetMap",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-            )
+private fun Header(state: HomeState, f: Forecast?, onOpenAlerts: () -> Unit, alertsOn: Boolean) {
+    val saved = state.places.find { it.id == state.selected }
+    val subtitle = when {
+        f == null -> "Carregando…"
+        else -> {
+            val time = DateTimeFormatter.ofPattern("HH:mm", ptBR).withZone(f.offset).format(f.fetchedAt)
+            if (saved == null && state.place?.isFallback == true) "Sem permissão de localização · atualizado às $time"
+            else "Atualizado às $time"
         }
     }
-}
-
-@Composable
-private fun Header(state: HomeState, f: Forecast, onOpenAlerts: () -> Unit, alertsOn: Boolean) {
-    val time = DateTimeFormatter.ofPattern("HH:mm", ptBR).withZone(f.offset).format(f.fetchedAt)
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-        Icon(Icons.Rounded.LocationOn, null, tint = MaterialTheme.colorScheme.primary)
+        Icon(saved?.kind?.icon() ?: Icons.Rounded.LocationOn, null, tint = MaterialTheme.colorScheme.primary)
         Spacer(Modifier.width(6.dp))
         Column(Modifier.weight(1f)) {
-            Text(state.place?.name ?: "—", style = MaterialTheme.typography.titleLarge)
             Text(
-                if (state.place?.isFallback == true) "Sem permissão de localização · atualizado às $time"
-                else "Atualizado às $time",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                state.place?.name ?: "—",
+                style = MaterialTheme.typography.titleLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         FilledTonalIconButton(onClick = onOpenAlerts) {
             Icon(
@@ -369,7 +383,7 @@ private fun DailyCard(days: List<DaySlot>) {
 @Composable
 private fun ErrorState(message: String, onRetry: () -> Unit) {
     Column(
-        Modifier.fillMaxSize().padding(32.dp),
+        Modifier.fillMaxWidth().padding(32.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {

@@ -33,7 +33,6 @@ import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.SmallFloatingActionButton
-import androidx.compose.material3.Slider
 import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.SuggestionChipDefaults
 import androidx.compose.material3.Text
@@ -44,6 +43,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -63,6 +63,10 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.giwnltrema.chuva.HomeState
 import com.giwnltrema.chuva.MapState
 import com.giwnltrema.chuva.data.LocationProvider
+import com.giwnltrema.chuva.data.SavedPlace
+import com.giwnltrema.chuva.data.firstRainyHour
+import com.giwnltrema.chuva.data.forecastActivity
+import com.giwnltrema.chuva.data.radarActivity
 import com.giwnltrema.chuva.ui.theme.RainScale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -78,7 +82,7 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
-private enum class Mode { RADAR, FORECAST }
+internal enum class Mode { RADAR, FORECAST }
 
 private val clock = DateTimeFormatter.ofPattern("HH:mm").withZone(ZoneId.systemDefault())
 private val hourOnly = DateTimeFormatter.ofPattern("HH'h'").withZone(ZoneId.systemDefault())
@@ -90,8 +94,10 @@ fun MapScreen(
     state: MapState,
     onLoadRadar: (Double, Double, Boolean) -> Unit,
     onLoadGrid: (Double, Double) -> Unit,
+    places: List<SavedPlace> = emptyList(),
 ) {
-    val place = home.place ?: LocationProvider.SAO_PAULO
+    // O mapa sempre parte de onde você está (não do lugar escolhido na aba Previsão).
+    val place = home.here ?: home.place ?: LocationProvider.SAO_PAULO
     val markerColor = MaterialTheme.colorScheme.primary.toArgb()
     val statusBarPx = WindowInsets.statusBars.getTop(LocalDensity.current)
     val density = LocalDensity.current.density
@@ -107,6 +113,15 @@ fun MapScreen(
 
     val mapView = rememberMapViewWithLifecycle()
 
+    // Toque no mapa → "neste ponto: X mm/h às HHh".
+    var tapInfo by remember { mutableStateOf<String?>(null) }
+    val currentTap = rememberUpdatedState { lat: Double, lon: Double ->
+        tapInfo = pointInfo(mode, state, if (mode == Mode.RADAR) radarIndex else forecastIndex, lat, lon)
+    }
+    LaunchedEffect(tapInfo) {
+        if (tapInfo != null) { delay(8000); tapInfo = null }
+    }
+
     LaunchedEffect(mapView) {
         mapView.getMapAsync { m ->
             m.uiSettings.apply {
@@ -121,8 +136,13 @@ fun MapScreen(
             m.cameraPosition = CameraPosition.Builder().target(LatLng(place.lat, place.lon)).zoom(9.5).build()
             centeredOn = LatLng(place.lat, place.lon)
             m.setStyle(Style.Builder().fromUri(BASE_STYLE_URL)) { s ->
+                s.addPlaceMarkers()
                 s.addUserMarker(place, markerColor)
                 style = s
+            }
+            m.addOnMapClickListener { latLng ->
+                currentTap.value(latLng.latitude, latLng.longitude)
+                true
             }
             map = m
         }
@@ -140,6 +160,7 @@ fun MapScreen(
     }
 
     LaunchedEffect(place) { onLoadRadar(place.lat, place.lon, false) }
+    LaunchedEffect(style, places) { style?.setPlaceMarkers(places) }
 
     LaunchedEffect(mode) {
         playing = false
@@ -166,10 +187,12 @@ fun MapScreen(
     }
 
     // --- Previsão ---
+    // Abre já na próxima hora com chuva na área (se houver), em vez de uma hora vazia.
     LaunchedEffect(state.grid) {
         val grid = state.grid ?: return@LaunchedEffect
         val now = Instant.now()
-        forecastIndex = grid.times.indexOfFirst { it.plusSeconds(3600).isAfter(now) }.coerceAtLeast(0)
+        forecastIndex = firstRainyHour(grid, now)
+            ?: grid.times.indexOfFirst { it.plusSeconds(3600).isAfter(now) }.coerceAtLeast(0)
     }
     LaunchedEffect(style, state.grid, forecastIndex) {
         val s = style ?: return@LaunchedEffect
@@ -200,12 +223,15 @@ fun MapScreen(
     Box(Modifier.fillMaxSize()) {
         AndroidView(factory = { mapView }, modifier = Modifier.fillMaxSize())
 
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        Column(
+            verticalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier
                 .statusBarsPadding()
                 .padding(12.dp),
+        ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Card(
                 shape = RoundedCornerShape(50),
@@ -229,6 +255,10 @@ fun MapScreen(
                     )
                 }
             }
+        }
+        val insight = insight(mode, state, place, if (mode == Mode.RADAR) radarIndex else forecastIndex)
+        InsightCard(insight.first, insight.second)
+        tapInfo?.let { InsightCard(it, null, onClose = { tapInfo = null }) }
         }
 
         Column(
@@ -288,7 +318,7 @@ fun MapScreen(
 }
 
 @Composable
-private fun TimelineCard(
+internal fun TimelineCard(
     mode: Mode,
     state: MapState,
     index: Int,
@@ -328,12 +358,21 @@ private fun TimelineCard(
                 }
             }
             if (count > 1) {
-                Slider(
-                    value = index.toFloat(),
-                    onValueChange = { onSeek(it.toInt()) },
-                    valueRange = 0f..(count - 1).toFloat(),
-                    steps = (count - 2).coerceAtLeast(0),
+                Spacer(Modifier.height(10.dp))
+                val activity = when (mode) {
+                    Mode.RADAR -> state.radar?.let(::radarActivity)
+                    Mode.FORECAST -> state.grid?.let(::forecastActivity)
+                }.orEmpty()
+                ActivityTimeline(
+                    values = activity,
+                    // Escala: radar = fração da área com chuva; previsão = mm/h máx. na área.
+                    fullScale = if (mode == Mode.RADAR) 0.15 else 10.0,
+                    index = index,
+                    onSeek = onSeek,
+                    startLabel = if (mode == Mode.RADAR) "−2 h" else "agora",
+                    endLabel = if (mode == Mode.RADAR) "agora" else "+24 h",
                 )
+                Spacer(Modifier.height(8.dp))
             }
             Legend()
             state.error?.let {

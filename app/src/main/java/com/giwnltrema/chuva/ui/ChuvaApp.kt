@@ -26,6 +26,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.giwnltrema.chuva.MainViewModel
 import com.giwnltrema.chuva.ui.home.AlertsSheet
 import com.giwnltrema.chuva.ui.home.HomeScreen
+import com.giwnltrema.chuva.ui.home.PlaceSheet
+import com.giwnltrema.chuva.data.SavedPlace
+import androidx.compose.runtime.remember
 import com.giwnltrema.chuva.ui.map.MapScreen
 import com.giwnltrema.chuva.ui.trip.TripScreen
 
@@ -45,6 +48,20 @@ fun ChuvaApp(vm: MainViewModel) {
     val alerts by vm.alerts.collectAsStateWithLifecycle()
     val trip by vm.trip.collectAsStateWithLifecycle()
     var showAlerts by rememberSaveable { mutableStateOf(false) }
+    // Folha de cadastro/edição de lugar (editingPlace = null → lugar novo).
+    var showPlaceSheet by remember { mutableStateOf(false) }
+    var editingPlace by remember { mutableStateOf<SavedPlace?>(null) }
+
+    if (showPlaceSheet) {
+        PlaceSheet(
+            editing = editingPlace,
+            search = vm::searchAddress,
+            currentAddress = vm::currentAddress,
+            onSave = { vm.savePlace(it); vm.selectPlace(it.id); showPlaceSheet = false },
+            onDelete = { vm.deletePlace(it); showPlaceSheet = false },
+            onDismiss = { showPlaceSheet = false },
+        )
+    }
 
     if (showAlerts) {
         AlertsSheet(settings = alerts, onChange = vm::updateAlerts, onDismiss = { showAlerts = false })
@@ -71,6 +88,8 @@ fun ChuvaApp(vm: MainViewModel) {
                 onOpenMap = { selected = 2 },
                 onOpenAlerts = { showAlerts = true },
                 alertsOn = alerts.anyEnabled,
+                onSelectPlace = vm::selectPlace,
+                onEditPlace = { editingPlace = it; showPlaceSheet = true },
                 modifier = Modifier.padding(padding),
             )
             1 -> TripScreen(
@@ -82,6 +101,7 @@ fun ChuvaApp(vm: MainViewModel) {
                 onSelect = vm::selectDeparture,
                 onRetry = vm::recomputeTrip,
                 onClear = vm::clearTrip,
+                saved = home.places,
                 modifier = Modifier.padding(padding),
             )
             else -> Box(Modifier.padding(bottom = padding.calculateBottomPadding())) {
@@ -90,6 +110,7 @@ fun ChuvaApp(vm: MainViewModel) {
                     state = map,
                     onLoadRadar = vm::loadRadar,
                     onLoadGrid = vm::loadGrid,
+                    places = home.places,
                 )
             }
         }

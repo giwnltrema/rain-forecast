@@ -139,6 +139,8 @@ class RadarWindow(lat: Double, lon: Double, val radiusKm: Double = RADAR_RADIUS_
 private const val WORLD_PX = 256.0 * (1 shl RADAR_ZOOM)
 private fun pxToLon(x: Double) = x / WORLD_PX * 360.0 - 180.0
 private fun pxToLat(y: Double) = atan(sinh(PI * (1 - 2 * y / WORLD_PX))) * 180 / PI
+internal fun pxToLongitude(x: Double) = pxToLon(x)
+internal fun pxToLatitude(y: Double) = pxToLat(y)
 
 /**
  * "Clutter": ecos parados que o radar vê em prédios, torres e morros (ex.: espigão da Paulista).

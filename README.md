@@ -12,7 +12,15 @@ com cara de Android moderno (Material You / Material 3).
 - **7 dias**: acumulado (mm), chance máxima, mín/máx.
 - Puxe para baixo para atualizar. Usa sua localização (ou São Paulo, se você negar a permissão).
 
+**Lugares salvos** (chips no topo da Previsão: Aqui · Casa · Trabalho · ＋)
+- Toque para ver previsão e radar de lá; segure para editar/apagar.
+- Aparecem também como atalhos no Trajeto e como marcadores no Mapa.
+
 **Aba Mapa**
+- Cartão no topo responde direto: *"Chuva mais próxima: ~46 km a noroeste · fraca"* ou
+  *"Chuva na área a partir das 16h · até 8 mm/h"*.
+- Linha do tempo em barrinhas: dá para ver quando chove na área e tocar para ir até lá;
+  a Previsão já abre na próxima hora com chuva. Toque num ponto do mapa para ver a chuva ali.
 - **Radar**: imagens reais de radar das últimas ~2 h, animadas — dá para ver as formações chegando.
 - **Previsão**: mapa de chuva prevista (mm/h) hora a hora para as próximas 24 h, numa área de ~120 km
   em volta de você. *"Prever nesta área"* recalcula para onde o mapa estiver.
