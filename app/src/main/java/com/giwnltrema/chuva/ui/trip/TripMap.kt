@@ -12,6 +12,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.giwnltrema.chuva.data.RainSource
@@ -67,7 +68,7 @@ private fun Color.hex() = String.format("#%06X", toArgb() and 0xFFFFFF)
 
 /** Mapa da rota, com cada trecho pintado pela chuva na hora em que você passa por ele. */
 @Composable
-fun TripMap(route: Route, plan: TripPlan, modifier: Modifier = Modifier) {
+fun TripMap(route: Route, plan: TripPlan, modifier: Modifier = Modifier, height: Dp = 260.dp) {
     val mapView = rememberMapViewWithLifecycle()
     var map by remember { mutableStateOf<MapLibreMap?>(null) }
     var style by remember { mutableStateOf<Style?>(null) }
@@ -136,5 +137,5 @@ fun TripMap(route: Route, plan: TripPlan, modifier: Modifier = Modifier) {
         runCatching { m.moveCamera(CameraUpdateFactory.newLatLngBounds(bounds, padding)) }
     }
 
-    AndroidView(factory = { mapView }, modifier = modifier.fillMaxWidth().height(280.dp))
+    AndroidView(factory = { mapView }, modifier = modifier.fillMaxWidth().height(height))
 }

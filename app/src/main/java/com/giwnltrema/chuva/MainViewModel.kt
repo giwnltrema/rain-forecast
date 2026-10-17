@@ -20,6 +20,7 @@ import com.giwnltrema.chuva.data.TripRepository
 import com.giwnltrema.chuva.data.TripStore
 import com.giwnltrema.chuva.data.WeatherRepository
 import com.giwnltrema.chuva.data.bestPlan
+import com.giwnltrema.chuva.data.distanceKm
 import com.giwnltrema.chuva.data.planTrip
 import com.giwnltrema.chuva.data.sampleRoute
 import com.giwnltrema.chuva.notify.RainCheckWorker
@@ -106,18 +107,47 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private var radarFetchedAt: Instant? = null
     private var radarCenter: Pair<Double, Double>? = null
 
+    /**
+     * Abre rápido: mostra na hora a última previsão salva e atualiza por trás. Previsão, nome do
+     * bairro e radar chegam cada um no seu tempo — a tela não espera o mais lento.
+     */
     fun refresh() {
         homeJob?.cancel()
         homeJob = viewModelScope.launch {
+            if (_home.value.forecast == null) {
+                alertStore.loadForecast()?.let { cached ->
+                    runCatching { repo.parseForecast(cached.body, cached.fetchedAt) }.onSuccess { f ->
+                        _home.update { it.copy(place = cached.place, forecast = f) }
+                    }
+                }
+            }
             _home.update { it.copy(loading = true, error = null) }
             try {
-                val place = locator.currentPlace()
-                alertStore.lastPlace = place
+                val located = locator.currentPlace()
+                // Nome provisório: o último conhecido se ainda estiver perto (< 1 km).
+                val known = alertStore.lastPlace
+                val place = if (!located.isFallback && known != null &&
+                    distanceKm(known.lat, known.lon, located.lat, located.lon) < 1.0
+                ) located.copy(name = known.name) else located
                 _home.update { it.copy(place = place) }
+
                 coroutineScope {
-                    val radar = async { repo.radarNow(place.lat, place.lon, clutter = alertStore) }
-                    val forecast = repo.forecast(place.lat, place.lon)
-                    _home.update { it.copy(forecast = forecast, radar = radar.await(), loading = false) }
+                    if (!place.isFallback) launch {
+                        locator.reverseGeocode(place.lat, place.lon)?.let { name ->
+                            val named = place.copy(name = name)
+                            alertStore.lastPlace = named
+                            _home.update { it.copy(place = named) }
+                        } ?: run { alertStore.lastPlace = place }
+                    }
+                    launch {
+                        val radar = repo.radarNow(place.lat, place.lon, clutter = alertStore)
+                        _home.update { it.copy(radar = radar) }
+                    }
+                    val now = Instant.now()
+                    val body = repo.forecastRaw(place.lat, place.lon)
+                    val forecast = repo.parseForecast(body, now)
+                    _home.update { it.copy(forecast = forecast, loading = false) }
+                    alertStore.saveForecast(_home.value.place ?: place, body, now)
                 }
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e

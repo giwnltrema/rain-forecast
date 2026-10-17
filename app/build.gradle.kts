@@ -55,6 +55,18 @@ android {
     buildFeatures {
         compose = true
     }
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+        // Prévias de tela (Roborazzi) só com ./gradlew testDebugUnitTest -Ppreviews
+        // (imagens em app/build/previews); fora disso não rodam, para o CI ficar rápido.
+        unitTests.all {
+            if (project.hasProperty("previews")) {
+                it.systemProperty("roborazzi.test.record", "true")
+            } else {
+                it.exclude("**/*Preview*")
+            }
+        }
+    }
 }
 
 dependencies {
@@ -82,4 +94,10 @@ dependencies {
     implementation("org.maplibre.gl:android-sdk:11.8.0")
 
     testImplementation("junit:junit:4.13.2")
+    // Prévia de telas no computador (sem celular): Robolectric + Roborazzi.
+    testImplementation("org.robolectric:robolectric:4.14.1")
+    testImplementation("io.github.takahirom.roborazzi:roborazzi:1.40.1")
+    testImplementation("io.github.takahirom.roborazzi:roborazzi-compose:1.40.1")
+    testImplementation("androidx.compose.ui:ui-test-junit4")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
 }

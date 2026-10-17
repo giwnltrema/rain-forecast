@@ -23,21 +23,24 @@ class LocationProvider(private val context: Context) {
         listOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
             .any { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED }
 
+    /**
+     * Posição atual, rápida: usa a última localização conhecida do aparelho se tiver menos de
+     * 15 min (instantâneo); senão pede uma nova (até 8 s). O nome do bairro vem depois, à parte
+     * ([reverseGeocode]) — aqui o nome é só um provisório.
+     */
     @SuppressLint("MissingPermission")
     suspend fun currentPlace(): Place {
         if (!hasPermission()) return SAO_PAULO
         val location = runCatching {
-            withTimeoutOrNull(10_000) {
-                val cts = CancellationTokenSource()
-                fused.getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, cts.token).await()
-            } ?: fused.lastLocation.await()
+            val last = fused.lastLocation.await()
+            val fresh = last != null && System.currentTimeMillis() - last.time < 15 * 60_000
+            if (fresh) last else withTimeoutOrNull(8_000) {
+                fused.getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, CancellationTokenSource().token).await()
+            } ?: last
         }.getOrNull() ?: return SAO_PAULO.copy(name = "São Paulo (sem GPS)")
-
-        val name = reverseGeocode(location.latitude, location.longitude) ?: "Sua localização"
-        return Place(location.latitude, location.longitude, name)
+        return Place(location.latitude, location.longitude, "Sua localização")
     }
 
-    @Suppress("DEPRECATION")
     suspend fun reverseGeocode(lat: Double, lon: Double): String? = withContext(Dispatchers.IO) {
         if (!Geocoder.isPresent()) return@withContext null
         runCatching {

@@ -84,4 +84,31 @@ class AlertStore(context: Context) : ClutterCache {
             .putString("clutter", mask.joinToString(","))
             .apply()
     }
+
+    // --- Última previsão (para a tela abrir instantaneamente) ---
+
+    fun saveForecast(place: Place, body: String, fetchedAt: Instant) {
+        prefs.edit()
+            .putString("fcBody", body)
+            .putLong("fcAt", fetchedAt.epochSecond)
+            .putFloat("fcLat", place.lat.toFloat())
+            .putFloat("fcLon", place.lon.toFloat())
+            .putString("fcName", place.name)
+            .apply()
+    }
+
+    /** Previsão salva com até [maxAgeHours] horas, com o lugar a que ela se refere. */
+    fun loadForecast(maxAgeHours: Long = 12): CachedForecast? {
+        val body = prefs.getString("fcBody", null) ?: return null
+        val at = Instant.ofEpochSecond(prefs.getLong("fcAt", 0))
+        if (Instant.now().epochSecond - at.epochSecond > maxAgeHours * 3600) return null
+        val place = Place(
+            prefs.getFloat("fcLat", 0f).toDouble(),
+            prefs.getFloat("fcLon", 0f).toDouble(),
+            prefs.getString("fcName", null) ?: "Sua localização",
+        )
+        return CachedForecast(place, body, at)
+    }
 }
+
+data class CachedForecast(val place: Place, val body: String, val fetchedAt: Instant)

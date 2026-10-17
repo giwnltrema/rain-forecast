@@ -32,7 +32,10 @@ class WeatherRepository(
 ) {
     private val json = Json { ignoreUnknownKeys = true; coerceInputValues = true }
 
-    suspend fun forecast(lat: Double, lon: Double): Forecast = withContext(Dispatchers.IO) {
+    suspend fun forecast(lat: Double, lon: Double): Forecast = parseForecast(forecastRaw(lat, lon))
+
+    /** Resposta crua do Open-Meteo (o app guarda para abrir instantaneamente da próxima vez). */
+    suspend fun forecastRaw(lat: Double, lon: Double): String = withContext(Dispatchers.IO) {
         val url = "https://api.open-meteo.com/v1/forecast" +
             "?latitude=${lat.fmt()}&longitude=${lon.fmt()}" +
             "&current=temperature_2m,apparent_temperature,precipitation,weather_code,is_day" +
@@ -41,8 +44,11 @@ class WeatherRepository(
             "&forecast_hours=48" +
             "&daily=precipitation_sum,precipitation_probability_max,temperature_2m_min,temperature_2m_max,weather_code" +
             "&forecast_days=7&timezone=auto&timeformat=unixtime"
-        json.decodeFromString<OmResponse>(get(url)).toForecast()
+        get(url)
     }
+
+    fun parseForecast(body: String, fetchedAt: Instant = Instant.now()): Forecast =
+        json.decodeFromString<OmResponse>(body).toForecast(Instant.now(), fetchedAt)
 
     suspend fun radarFrames(): List<RadarFrame> = withContext(Dispatchers.IO) {
         val maps = json.decodeFromString<RvMaps>(get("https://api.rainviewer.com/public/weather-maps.json"))
@@ -65,9 +71,11 @@ class WeatherRepository(
             val past = (frames ?: radarFrames()).filter { !it.time.isAfter(now) }
             val latest = past.lastOrNull() ?: return@runCatching null
             val earlier = past.lastOrNull { !it.time.isAfter(latest.time.minusSeconds(25 * 60)) }
-            val readers = past.associateWith { reader(it) }
+            // Com a máscara de clutter em cache bastam 2 quadros; sem ela, precisa das ~2 h inteiras.
+            val cached = clutter?.load(lat, lon, now)
+            val readers = prefetch(if (cached != null) listOfNotNull(latest, earlier) else past, RadarWindow(lat, lon))
 
-            val mask = clutter?.load(lat, lon, now)
+            val mask = cached
                 ?: buildClutterMask(lat, lon, past.map { readers.getValue(it) })
                     .also { clutter?.save(lat, lon, now, it) }
 
@@ -81,23 +89,24 @@ class WeatherRepository(
     suspend fun radarArea(lat: Double, lon: Double, radiusKm: Double = 150.0): RadarArea = withContext(Dispatchers.IO) {
         val now = Instant.now()
         val frames = radarFrames().filter { !it.time.isAfter(now) }
-        // Baixa todos os tiles de todos os quadros em paralelo (~13 quadros x até 4 tiles).
-        val w = RadarWindow(lat, lon, radiusKm, circular = false)
+        val readers = prefetch(frames, RadarWindow(lat, lon, radiusKm, circular = false))
+        buildRadarArea(lat, lon, radiusKm, frames.map { it.time to readers.getValue(it) })
+    }
+
+    /** Baixa em paralelo todos os tiles que cobrem a janela, em todos os quadros (~13 x 1–4 tiles). */
+    private suspend fun prefetch(frames: List<RadarFrame>, w: RadarWindow): Map<RadarFrame, FrameReader> = coroutineScope {
         val tileCoords = buildList {
             for (ty in Math.floorDiv(w.y0, 256)..Math.floorDiv(w.y0 + w.size - 1, 256))
                 for (tx in Math.floorDiv(w.x0, 256)..Math.floorDiv(w.x0 + w.size - 1, 256)) add(tx to ty)
         }
-        val readers = coroutineScope {
-            frames.map { frame ->
-                async {
-                    val tiles = HashMap<Long, IntArray?>()
-                    tileCoords.map { (tx, ty) -> async { pixelKey(tx, ty) to fetchTile(frame, tx, ty) } }
-                        .awaitAll().forEach { (k, v) -> tiles[k] = v }
-                    frame.time to reader(frame, tiles)
-                }
-            }.awaitAll()
-        }
-        buildRadarArea(lat, lon, radiusKm, readers)
+        frames.map { frame ->
+            async {
+                val tiles = HashMap<Long, IntArray?>()
+                tileCoords.map { (tx, ty) -> async { pixelKey(tx, ty) to fetchTile(frame, tx, ty) } }
+                    .awaitAll().forEach { (k, v) -> tiles[k] = v }
+                frame to reader(frame, tiles)
+            }
+        }.awaitAll().toMap()
     }
 
     /**
@@ -181,7 +190,7 @@ class WeatherRepository(
  * No Open-Meteo, a precipitação de um horário T é o acumulado do intervalo que *termina* em T.
  * Aqui guardamos o *início* do intervalo, que é como a gente lê ("chuva das 14h às 15h").
  */
-internal fun OmResponse.toForecast(now: Instant = Instant.now()): Forecast {
+internal fun OmResponse.toForecast(now: Instant = Instant.now(), fetchedAt: Instant = now): Forecast {
     val offset = ZoneOffset.ofTotalSeconds(utcOffsetSeconds)
     val c = current
     val m = minutely15
@@ -227,7 +236,7 @@ internal fun OmResponse.toForecast(now: Instant = Instant.now()): Forecast {
         hourly = hours,
         daily = days,
         offset = offset,
-        fetchedAt = now,
+        fetchedAt = fetchedAt,
     )
 }
 

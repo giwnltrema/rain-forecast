@@ -7,9 +7,13 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -18,6 +22,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -47,6 +52,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -54,6 +60,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -88,14 +95,19 @@ fun TripScreen(
     modifier: Modifier = Modifier,
 ) {
     val focus = LocalFocusManager.current
+    val listState = rememberLazyListState()
+    LaunchedEffect(state.plans) { if (state.plans.isNotEmpty()) listState.animateScrollToItem(0) }
     LazyColumn(
+        state = listState,
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
         modifier = modifier.fillMaxSize(),
     ) {
         item {
-            Text("Vai chover no caminho?", style = MaterialTheme.typography.titleLarge)
-            Spacer(Modifier.height(12.dp))
+            if (state.route == null) {
+                Text("Vai chover no caminho?", style = MaterialTheme.typography.titleLarge)
+                Spacer(Modifier.height(12.dp))
+            }
             OutlinedTextField(
                 value = state.query,
                 onValueChange = onQuery,
@@ -148,14 +160,16 @@ fun TripScreen(
             state.route != null && state.plans.isNotEmpty() -> {
                 val plan = state.plans[state.selected]
                 item { Summary(state, plan) }
+                item { Departures(state, onSelect) }
                 item {
+                    // ~30% da altura da tela, entre 170 e 280 dp (cabe em qualquer celular).
+                    val mapHeight = (LocalConfiguration.current.screenHeightDp * 0.3f).coerceIn(170f, 280f).dp
                     Card(shape = RoundedCornerShape(24.dp), modifier = Modifier.fillMaxWidth()) {
-                        TripMap(state.route, plan)
+                        TripMap(state.route, plan, height = mapHeight)
                     }
                 }
-                item { Legend() }
-                item { Departures(state, onSelect) }
                 item { Timeline(plan) }
+                item { Legend() }
                 item {
                     Text(
                         "Até ~${RADAR_HORIZON_MIN.roundToInt()} min à frente: radar real projetado pelo movimento da chuva. " +
@@ -170,14 +184,16 @@ fun TripScreen(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ModeRow(state: TripState, onMode: (TravelMode) -> Unit, onTraffic: (Boolean) -> Unit) {
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+internal fun ModeRow(state: TripState, onMode: (TravelMode) -> Unit, onTraffic: (Boolean) -> Unit) {
+    // FlowRow: se não couber, o chip inteiro vai para a linha de baixo (nunca quebra a palavra).
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         TravelMode.entries.forEach { m ->
             FilterChip(
                 selected = state.mode == m,
                 onClick = { onMode(m) },
-                label = { Text(m.label) },
+                label = { Text(m.label, maxLines = 1, softWrap = false) },
                 leadingIcon = {
                     Icon(
                         when (m) {
@@ -194,7 +210,7 @@ private fun ModeRow(state: TripState, onMode: (TravelMode) -> Unit, onTraffic: (
             FilterChip(
                 selected = state.heavyTraffic,
                 onClick = { onTraffic(!state.heavyTraffic) },
-                label = { Text("Trânsito") },
+                label = { Text("Trânsito", maxLines = 1, softWrap = false) },
                 leadingIcon = { Icon(Icons.Rounded.Traffic, null, Modifier.size(18.dp)) },
             )
         }
@@ -237,7 +253,7 @@ private fun EmptyHint() {
 }
 
 @Composable
-private fun Summary(state: TripState, plan: TripPlan) {
+internal fun Summary(state: TripState, plan: TripPlan) {
     val s = summarizeTrip(plan, state.wetPlaces[state.selected])
     val bg = when {
         plan.unknown -> TripColors.unknown
@@ -249,7 +265,7 @@ private fun Summary(state: TripState, plan: TripPlan) {
         }
     }
     val fg = if (s.intensity == Intensity.LIGHT) Color(0xFF3B2F00) else Color.White
-    Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(bg).padding(20.dp)) {
+    Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(bg).padding(horizontal = 20.dp, vertical = 16.dp)) {
         Column {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
@@ -261,10 +277,10 @@ private fun Summary(state: TripState, plan: TripPlan) {
                     null, tint = fg, modifier = Modifier.size(28.dp),
                 )
                 Spacer(Modifier.width(10.dp))
-                Text(s.headline, style = MaterialTheme.typography.headlineSmall, color = fg, fontWeight = FontWeight.SemiBold)
+                Text(s.headline, style = MaterialTheme.typography.titleLarge, color = fg, fontWeight = FontWeight.SemiBold)
             }
             Spacer(Modifier.height(6.dp))
-            Text(s.detail, style = MaterialTheme.typography.bodyLarge, color = fg.copy(alpha = 0.92f))
+            Text(s.detail, style = MaterialTheme.typography.bodyMedium, color = fg.copy(alpha = 0.92f))
             state.destination?.let {
                 Text("Para ${it.name}", style = MaterialTheme.typography.bodySmall, color = fg.copy(alpha = 0.8f))
             }
@@ -282,9 +298,10 @@ private fun Summary(state: TripState, plan: TripPlan) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun Legend() {
-    Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
+internal fun Legend() {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         listOf(TripColors.dry to "Seco", TripColors.light to "Fraca", TripColors.moderate to "Moderada", TripColors.heavy to "Forte")
             .forEach { (c, label) ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -297,11 +314,12 @@ private fun Legend() {
 }
 
 @Composable
-private fun Departures(state: TripState, onSelect: (Int) -> Unit) {
+internal fun Departures(state: TripState, onSelect: (Int) -> Unit) {
     Column {
         Text("Quando sair", style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.height(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        // Todos os cartões com a mesma altura (o selo "melhor" não desalinha a fileira).
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.height(IntrinsicSize.Min)) {
             state.plans.forEachIndexed { i, p ->
                 val selected = i == state.selected
                 Card(
@@ -311,18 +329,25 @@ private fun Departures(state: TripState, onSelect: (Int) -> Unit) {
                     colors = CardDefaults.cardColors(
                         containerColor = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,
                     ),
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f).fillMaxHeight(),
                 ) {
                     Column(
-                        Modifier.fillMaxWidth().padding(vertical = 10.dp, horizontal = 4.dp),
+                        Modifier.fillMaxWidth().padding(vertical = 10.dp, horizontal = 2.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
                         val d = DEPARTURES[i]
                         Text(
                             when (d) { 0 -> "Agora"; 60 -> "+1 h"; else -> "+$d min" },
                             style = MaterialTheme.typography.labelLarge,
+                            maxLines = 1,
+                            softWrap = false,
                         )
-                        Text(clock.format(p.departure), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            clock.format(p.departure),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                        )
                         Spacer(Modifier.height(6.dp))
                         Icon(
                             when {
@@ -342,6 +367,8 @@ private fun Departures(state: TripState, onSelect: (Int) -> Unit) {
                             },
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                         if (i == state.best && state.best != 0) {
                             Text("melhor", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
@@ -355,7 +382,7 @@ private fun Departures(state: TripState, onSelect: (Int) -> Unit) {
 
 /** Barra do tempo de viagem, pintada pela chuva em cada trecho. */
 @Composable
-private fun Timeline(plan: TripPlan) {
+internal fun Timeline(plan: TripPlan) {
     val total = plan.points.lastOrNull()?.sample?.offsetMin ?: return
     if (total <= 0) return
     val track = MaterialTheme.colorScheme.surfaceContainerHighest
