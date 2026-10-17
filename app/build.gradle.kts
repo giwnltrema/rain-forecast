@@ -23,24 +23,25 @@ android {
         }
     }
 
+    // A chave de assinatura NÃO fica no repositório: o CI monta o arquivo a partir dos
+    // secrets CHUVA_KEYSTORE_BASE64 / CHUVA_KEYSTORE_PASSWORD. Localmente, sem essas
+    // variáveis, o release é assinado com a chave de debug (serve para testar).
+    val keystorePath = System.getenv("CHUVA_KEYSTORE")
     signingConfigs {
-        // Chave fixa e versionada de propósito: app pessoal, e assim os APKs
-        // gerados em máquinas diferentes (CI/local) se atualizam sem desinstalar.
-        create("personal") {
-            storeFile = file("chuva.keystore")
-            storePassword = "chuva-app"
-            keyAlias = "chuva"
-            keyPassword = "chuva-app"
+        if (keystorePath != null) {
+            create("personal") {
+                storeFile = file(keystorePath)
+                storePassword = System.getenv("CHUVA_KEYSTORE_PASSWORD")
+                keyAlias = "chuva"
+                keyPassword = System.getenv("CHUVA_KEYSTORE_PASSWORD")
+            }
         }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("personal")
-        }
-        debug {
-            signingConfig = signingConfigs.getByName("personal")
+            signingConfig = signingConfigs.findByName("personal") ?: signingConfigs.getByName("debug")
         }
     }
 

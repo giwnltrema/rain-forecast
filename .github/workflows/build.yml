@@ -19,8 +19,26 @@ jobs:
           distribution: temurin
           java-version: 17
       - uses: gradle/actions/setup-gradle@v4
+      - name: Chave de assinatura (dos secrets)
+        env:
+          KEYSTORE_B64: ${{ secrets.CHUVA_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.CHUVA_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ] || [ -z "$KEYSTORE_PASSWORD" ]; then
+            echo "::error::Faltam os secrets CHUVA_KEYSTORE_BASE64 e CHUVA_KEYSTORE_PASSWORD (Settings → Secrets and variables → Actions)."
+            exit 1
+          fi
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/chuva.keystore"
+          echo "CHUVA_KEYSTORE=$RUNNER_TEMP/chuva.keystore" >> "$GITHUB_ENV"
       - name: Lint + testes + APK
+        env:
+          CHUVA_KEYSTORE_PASSWORD: ${{ secrets.CHUVA_KEYSTORE_PASSWORD }}
         run: ./gradlew lintDebug testDebugUnitTest assembleRelease
+      - name: Conferir assinatura
+        run: |
+          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          "$APKSIGNER" verify --print-certs app/build/outputs/apk/release/app-release.apk | grep -q "CN=Chuva" \
+            || { echo "::error::APK não foi assinado com a chave do app"; exit 1; }
       - name: Renomear APK
         run: mv app/build/outputs/apk/release/app-release.apk app/build/vai-chuve-${{ github.run_number }}.apk
       - uses: actions/upload-artifact@v4

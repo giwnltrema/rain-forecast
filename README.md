@@ -94,10 +94,15 @@ app/src/main/java/com/giwnltrema/chuva/
 └── ui/theme/      # Material 3 + escala de cores da chuva
 ```
 
-### Sobre a chave de assinatura
+### Chave de assinatura
 
-`app/chuva.keystore` está versionada **de propósito**: é um app pessoal e isso permite que APKs
-gerados no CI e no seu PC se atualizem um por cima do outro. Não use essa chave para publicar na Play Store.
+A chave que assina o APK **não fica no repositório**: o GitHub Actions monta o arquivo a partir
+dos secrets `CHUVA_KEYSTORE_BASE64` e `CHUVA_KEYSTORE_PASSWORD`
+(Settings → Secrets and variables → Actions). Guarde uma cópia dela num lugar seguro — sem a
+mesma chave, uma versão nova não instala por cima da antiga.
+
+Compilando localmente sem essas variáveis, o release sai assinado com a chave de debug
+(bom para testar, mas não atualiza o app instalado pelo GitHub).
 
 ## Ideias para depois
 
