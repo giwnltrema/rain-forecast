@@ -118,7 +118,7 @@ class WeatherRepository(
     }
 
     private fun getBytes(url: String): ByteArray? {
-        val request = Request.Builder().url(url).header("User-Agent", "Chuva-Android/1.0").build()
+        val request = Request.Builder().url(url).header("User-Agent", "VaiChuve-Android/1.0").build()
         client.newCall(request).execute().use { resp ->
             if (!resp.isSuccessful) return null
             return resp.body?.bytes()
@@ -167,7 +167,7 @@ class WeatherRepository(
     }
 
     private fun get(url: String): String {
-        val request = Request.Builder().url(url).header("User-Agent", "Chuva-Android/1.0").build()
+        val request = Request.Builder().url(url).header("User-Agent", "VaiChuve-Android/1.0").build()
         client.newCall(request).execute().use { resp ->
             if (!resp.isSuccessful) throw IOException("HTTP ${resp.code} em ${request.url.host}")
             return resp.body?.string() ?: throw IOException("Resposta vazia")

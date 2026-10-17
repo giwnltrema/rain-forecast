@@ -143,7 +143,7 @@ class TripRepository(
     }
 
     private fun get(url: String): String {
-        val request = Request.Builder().url(url).header("User-Agent", "Chuva-Android/1.0 (app pessoal)").build()
+        val request = Request.Builder().url(url).header("User-Agent", "VaiChuve-Android/1.0 (app pessoal)").build()
         client.newCall(request).execute().use { resp ->
             if (!resp.isSuccessful) throw IOException("HTTP ${resp.code} em ${request.url.host}")
             return resp.body?.string() ?: throw IOException("Resposta vazia")

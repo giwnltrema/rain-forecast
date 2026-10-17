@@ -1,4 +1,4 @@
-# ☔ Chuva
+# ☔ Vai Chuvê
 
 App Android pessoal para saber **se e quando vai chover onde você está** — sem anúncio, sem assinatura,
 com cara de Android moderno (Material You / Material 3).
@@ -66,7 +66,7 @@ com cara de Android moderno (Material You / Material 3).
 
 ## Instalar no celular
 
-1. Abra **[Releases](https://github.com/giwnltrema/rain-forecast/releases/latest)** no celular e baixe o `chuva-NN.apk` mais recente
+1. Abra **[Releases](https://github.com/giwnltrema/rain-forecast/releases/latest)** no celular e baixe o `vai-chuve-NN.apk` mais recente
    (cada push gera um novo automaticamente pelo GitHub Actions).
 2. Toque no arquivo e permita *"instalar apps desconhecidos"* para o navegador/Arquivos.
 3. Atualizações: é só baixar o APK novo e instalar por cima.

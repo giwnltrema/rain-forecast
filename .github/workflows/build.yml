@@ -22,16 +22,16 @@ jobs:
       - name: Lint + testes + APK
         run: ./gradlew lintDebug testDebugUnitTest assembleRelease
       - name: Renomear APK
-        run: mv app/build/outputs/apk/release/app-release.apk app/build/chuva-${{ github.run_number }}.apk
+        run: mv app/build/outputs/apk/release/app-release.apk app/build/vai-chuve-${{ github.run_number }}.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: chuva-apk
-          path: app/build/chuva-${{ github.run_number }}.apk
+          name: vai-chuve-apk
+          path: app/build/vai-chuve-${{ github.run_number }}.apk
       - name: Publicar release (baixar direto pelo celular)
         uses: softprops/action-gh-release@v2
         with:
           tag_name: chuva-v${{ github.run_number }}
-          name: Chuva build ${{ github.run_number }}
+          name: Vai Chuvê build ${{ github.run_number }}
           target_commitish: ${{ github.sha }}
           make_latest: true
-          files: app/build/chuva-${{ github.run_number }}.apk
+          files: app/build/vai-chuve-${{ github.run_number }}.apk
