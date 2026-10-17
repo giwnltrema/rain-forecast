@@ -67,6 +67,7 @@ import com.giwnltrema.chuva.data.Intensity
 import com.giwnltrema.chuva.data.RADAR_HORIZON_MIN
 import com.giwnltrema.chuva.data.TravelMode
 import com.giwnltrema.chuva.data.TripPlan
+import com.giwnltrema.chuva.data.distanceKm
 import com.giwnltrema.chuva.data.summarizeTrip
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -119,14 +120,14 @@ fun TripScreen(
 
         when {
             state.suggestions.isNotEmpty() -> items(state.suggestions) { d ->
-                PlaceRow(d, Icons.Rounded.Place) { focus.clearFocus(); onChoose(d) }
+                PlaceRow(d, Icons.Rounded.Place, state.origin) { focus.clearFocus(); onChoose(d) }
             }
             state.destination == null -> {
                 if (state.recents.isEmpty()) {
                     item { EmptyHint() }
                 } else {
                     item { Text("Recentes", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                    items(state.recents) { d -> PlaceRow(d, Icons.Rounded.History) { focus.clearFocus(); onChoose(d) } }
+                    items(state.recents) { d -> PlaceRow(d, Icons.Rounded.History, state.origin) { focus.clearFocus(); onChoose(d) } }
                 }
             }
             state.loading -> item {
@@ -201,15 +202,25 @@ private fun ModeRow(state: TripState, onMode: (TravelMode) -> Unit, onTraffic: (
 }
 
 @Composable
-private fun PlaceRow(d: Destination, icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit) {
+private fun PlaceRow(
+    d: Destination,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    origin: Pair<Double, Double>?,
+    onClick: () -> Unit,
+) {
+    val km = origin?.let { distanceKm(it.first, it.second, d.lat, d.lon) }
+    val detail = listOfNotNull(km?.let(::formatKm), d.detail.ifBlank { null }).joinToString(" · ")
     ListItem(
         headlineContent = { Text(d.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-        supportingContent = { if (d.detail.isNotBlank()) Text(d.detail, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        supportingContent = { if (detail.isNotBlank()) Text(detail, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         leadingContent = { Icon(icon, null) },
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
         modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable(onClick = onClick),
     )
 }
+
+private fun formatKm(km: Double) =
+    if (km < 10) String.format(java.util.Locale("pt", "BR"), "%.1f km", km) else "${km.roundToInt()} km"
 
 @Composable
 private fun EmptyHint() {

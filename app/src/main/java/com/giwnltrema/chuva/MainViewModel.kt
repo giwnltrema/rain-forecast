@@ -57,6 +57,8 @@ data class MapState(
 )
 
 data class TripState(
+    /** De onde a busca/rota parte (para mostrar a distância dos resultados). */
+    val origin: Pair<Double, Double>? = null,
     val query: String = "",
     val suggestions: List<Destination> = emptyList(),
     val recents: List<Destination> = emptyList(),
@@ -170,7 +172,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         searchJob = viewModelScope.launch {
             delay(350) // espera parar de digitar
             val near = _home.value.place ?: LocationProvider.SAO_PAULO
-            runCatching { tripRepo.search(q.trim(), near.lat, near.lon) }
+            _trip.update { it.copy(origin = near.lat to near.lon) }
+            runCatching {
+                tripRepo.search(q.trim(), near.lat, near.lon) { name -> locator.searchByName(name, near.lat, near.lon) }
+            }
                 .onSuccess { list -> _trip.update { it.copy(suggestions = list) } }
         }
     }

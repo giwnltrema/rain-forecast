@@ -157,6 +157,8 @@ fun summarizeTrip(plan: TripPlan, wetPlace: String? = null, zone: ZoneId = ZoneI
     return TripSummary(headline, "A partir de ~${fmt.format(first.at)}$where ($source)", level)
 }
 
+fun distanceKm(lat1: Double, lon1: Double, lat2: Double, lon2: Double) = metersBetween(lat1, lon1, lat2, lon2) / 1000
+
 /** Distância aproximada em metros (suficiente para trechos curtos). */
 internal fun metersBetween(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
     val k = 111_320.0

@@ -162,4 +162,41 @@ class TripTest {
         assertEquals("Rua Augusta, 1500", list[1].name)
         assertEquals("Consolação · São Paulo", list[1].detail)
     }
+
+    @Test
+    fun genericWordsAreDropped() {
+        assertEquals("c6", withoutGenericWords("c6 bank"))
+        assertEquals("Itaú Faria Lima", withoutGenericWords("agência Itaú Faria Lima"))
+        assertEquals("nove de julho", withoutGenericWords("nove de julho"))
+    }
+
+    @Test
+    fun resultsAreDedupedAndSortedByDistance() {
+        val me = -23.585 to -46.68
+        val far = Destination("C6", "Guarulhos", -23.425, -46.483)
+        val near = Destination("C6", "Av. Nove de Julho · Jardim Paulista", -23.5669, -46.6586)
+        val sameAsNear = Destination("C6", "Avenida Nove de Julho · Jardins", -23.5668, -46.6585)
+        val list = rankResults(listOf(far, near, sameAsNear), "c6 bank", me.first, me.second)
+        assertEquals(listOf(near, far), list)
+    }
+
+    @Test
+    fun moreMatchingWordsBeatsDistance() {
+        val me = -23.585 to -46.68
+        val street1 = Destination("Avenida Nove de Julho", "Vila Olímpia · São Paulo", -23.590, -46.680)
+        val street2 = Destination("Avenida Nove de Julho", "Vila Olímpia · São Paulo", -23.591, -46.681) // outro trecho
+        val c6 = Destination("C6", "Avenida Nove de Julho · Jardim Paulista · São Paulo", -23.5669, -46.6586)
+        val list = rankResults(listOf(street1, street2, c6), "nove de julho c6", me.first, me.second)
+        assertEquals(listOf(c6, street1), list)
+    }
+
+    @Test
+    fun parsesNominatim() {
+        val body = """[{"name":"C6","lat":"-23.5668732","lon":"-46.6585552","address":{"amenity":"C6",
+            "road":"Avenida Nove de Julho","suburb":"Jardins","city":"São Paulo","country":"Brasil"}}]"""
+        val d = Json { ignoreUnknownKeys = true }.decodeFromString<List<NominatimPlace>>(body).single().toDestination()!!
+        assertEquals("C6", d.name)
+        assertEquals("Avenida Nove de Julho · Jardins · São Paulo", d.detail)
+        assertEquals(-23.5668732, d.lat, 1e-9)
+    }
 }
