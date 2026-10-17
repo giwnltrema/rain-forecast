@@ -57,7 +57,7 @@ object Notifier {
         )
         val n = NotificationCompat.Builder(context, channel)
             .setSmallIcon(R.drawable.ic_stat_rain)
-            .setColor(0xFF1E5BD8.toInt())
+            .setColor(0xFF5F6368.toInt())
             .setContentTitle(alert.title)
             .setContentText(alert.text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(alert.text))
